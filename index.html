@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learning Tree</title>
+<meta name="description" content="A personal tracker for what I am learning, drawn as a growing tree.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#127794;</text></svg>">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 21v-7M12 14 7.5 9.5M12 14l4.5-4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      <circle cx="12" cy="4.5" r="2.4" fill="currentColor"/>
+      <circle cx="6" cy="8" r="2" fill="currentColor" opacity=".75"/>
+      <circle cx="18" cy="8" r="2" fill="currentColor" opacity=".75"/>
+    </svg>
+    <div class="brand-text">
+      <h1 id="profileName">Learning Tree</h1>
+      <p id="profileSubtitle">Software Engineer Intern</p>
+    </div>
+  </div>
+
+  <div class="topbar-actions">
+    <div class="search-wrap">
+      <input id="search" type="search" placeholder="Search topics…" autocomplete="off" aria-label="Search topics">
+      <kbd>/</kbd>
+    </div>
+    <button id="addDomainBtn" class="btn btn-primary" title="Add a new top-level field">+ Field</button>
+    <div class="menu-wrap">
+      <button id="dataMenuBtn" class="btn" aria-haspopup="true" aria-expanded="false">Data</button>
+      <div id="dataMenu" class="menu" hidden>
+        <button data-action="export">Export JSON…</button>
+        <button data-action="copy">Copy JSON to clipboard</button>
+        <button data-action="import">Import JSON…</button>
+        <hr>
+        <button data-action="reload">Reload from repo file</button>
+        <button data-action="reset" class="danger">Reset to seed data</button>
+      </div>
+    </div>
+    <button id="themeBtn" class="btn btn-icon" title="Toggle theme" aria-label="Toggle theme">◐</button>
+  </div>
+</header>
+
+<nav class="tabbar" role="tablist" aria-label="Fields and views">
+  <div class="tabs-fields" id="fieldTabs"><!-- built from the fields in the data --></div>
+  <div class="tabs-fixed">
+    <button class="tab tab-fixed" data-view="focus" role="tab">Focus</button>
+    <button class="tab tab-fixed" data-view="list"  role="tab">List</button>
+    <button class="tab tab-fixed" data-view="stats" role="tab">Stats</button>
+  </div>
+</nav>
+
+<div id="banner" class="banner" hidden>
+  <span id="bannerText"></span>
+  <span class="banner-actions">
+    <button id="bannerAccept" class="btn btn-sm btn-primary">Load it</button>
+    <button id="bannerDismiss" class="btn btn-sm">Dismiss</button>
+  </span>
+</div>
+
+<main class="layout">
+
+  <!-- ============ TREE VIEW ============ -->
+  <section class="panel view" id="view-tree">
+    <div class="canvas-wrap">
+      <svg id="tree" role="img" aria-label="Learning tree">
+        <g id="viewport">
+          <g id="rings"></g>
+          <g id="links"></g>
+          <g id="nodes"></g>
+        </g>
+      </svg>
+
+      <div class="canvas-overlay canvas-legend">
+        <span class="legend-title">Status</span>
+        <ul id="legend"></ul>
+      </div>
+
+      <div class="canvas-overlay canvas-controls">
+        <button class="btn btn-icon" data-zoom="in" title="Zoom in">+</button>
+        <button class="btn btn-icon" data-zoom="out" title="Zoom out">−</button>
+        <button class="btn btn-icon" data-zoom="fit" title="Fit to screen">⤢</button>
+        <button class="btn btn-icon" id="expandAllBtn" title="Expand all branches">⊕</button>
+        <button class="btn btn-icon" id="layoutBtn" title="Switch between card tree and radial map">&#9635;</button>
+        <button class="btn btn-icon is-on" id="activityBtn" title="Show when each topic was last worked on">&#9201;</button>
+      </div>
+
+      <div class="canvas-empty" id="canvasEmpty" hidden>
+        <p class="big">This tree is empty.</p>
+        <p class="muted">Add the first topic you are working on, and it will branch out from here.</p>
+        <button class="btn btn-primary" id="emptyAddBtn">+ Add the first topic</button>
+      </div>
+
+      <p class="canvas-hint">Drag to pan · scroll to zoom · click a node to inspect · double-click to collapse</p>
+    </div>
+  </section>
+
+  <!-- ============ LIST VIEW ============ -->
+  <section class="panel view" id="view-list" hidden>
+    <div class="list-toolbar">
+      <label class="field-inline">
+        <span>Status</span>
+        <select id="listStatusFilter"><option value="">All</option></select>
+      </label>
+      <label class="field-inline">
+        <span>Field</span>
+        <select id="listDomainFilter"><option value="">All</option></select>
+      </label>
+      <label class="field-inline">
+        <span>Sort</span>
+        <select id="listSort">
+          <option value="tree">Tree order</option>
+          <option value="recent">Last worked</option>
+          <option value="time">Time logged</option>
+          <option value="name">Name</option>
+        </select>
+      </label>
+      <button class="btn btn-sm" id="listCollapseAll">Collapse all</button>
+      <span class="spacer"></span>
+      <span id="listCount" class="muted"></span>
+    </div>
+    <div id="listBody" class="list-body"></div>
+  </section>
+
+  <!-- ============ FOCUS VIEW ============ -->
+  <section class="panel view" id="view-focus" hidden>
+    <div class="focus-today">
+      <header class="focus-head">
+        <div>
+          <h2 id="focusDateLabel">Today</h2>
+          <p class="muted" id="focusSummary">Nothing planned yet.</p>
+        </div>
+        <div class="focus-ring" id="focusRing"></div>
+      </header>
+
+      <form id="focusForm" class="focus-form">
+        <input type="text" id="focusText" placeholder="What are you focusing on today?" autocomplete="off" aria-label="New task">
+        <select id="focusTopic" aria-label="Link to a topic">
+          <option value="">No topic</option>
+        </select>
+        <button class="btn btn-primary" type="submit">Add</button>
+      </form>
+
+      <div id="focusList" class="focus-list"></div>
+      <div class="focus-actions">
+        <button class="btn btn-sm" id="focusCarry" hidden></button>
+      </div>
+    </div>
+
+    <div class="focus-history">
+      <h3>Earlier days</h3>
+      <div id="focusHistory"></div>
+    </div>
+  </section>
+
+  <!-- ============ STATS VIEW ============ -->
+  <section class="panel view" id="view-stats" hidden>
+    <div class="stats-grid" id="statCards"></div>
+
+    <div class="stats-block">
+      <h2>Activity</h2>
+      <p class="muted">Study time over the last 26 weeks.</p>
+      <div id="heatmap" class="heatmap"></div>
+      <div class="heatmap-legend">
+        <span class="muted">Less</span>
+        <span class="hm-cell l0"></span><span class="hm-cell l1"></span><span class="hm-cell l2"></span><span class="hm-cell l3"></span><span class="hm-cell l4"></span>
+        <span class="muted">More</span>
+      </div>
+    </div>
+
+    <div class="stats-block">
+      <h2>Progress by field</h2>
+      <div id="domainProgress" class="domain-progress"></div>
+    </div>
+
+    <div class="stats-block">
+      <h2>Recent sessions</h2>
+      <div id="recentSessions" class="session-feed"></div>
+    </div>
+  </section>
+
+  <!-- ============ INSPECTOR ============ -->
+  <aside class="panel inspector" id="inspector">
+    <div class="inspector-empty" id="inspectorEmpty">
+      <p class="big">Nothing selected</p>
+      <p class="muted">Pick a node in the tree, or add a new field to start a branch.</p>
+    </div>
+    <div id="inspectorBody" hidden></div>
+  </aside>
+
+</main>
+
+<input type="file" id="importFile" accept="application/json,.json" hidden>
+<div id="toast" class="toast" hidden></div>
+
+<script src="js/store.js"></script>
+<script src="js/tree.js"></script>
+<script src="js/views.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,629 @@
+{
+  "version": 1,
+  "updatedAt": "2026-08-23T00:00:00.000Z",
+  "profile": {
+    "name": "My Learning Tree",
+    "subtitle": "Software Engineer Intern"
+  },
+  "nodes": [
+    {
+      "id": "hpc",
+      "parentId": null,
+      "name": "High Performance Computing",
+      "status": "learning",
+      "tags": [
+        "systems"
+      ],
+      "notes": "Main interest area. Want to get comfortable with parallel programming models.",
+      "resources": [],
+      "createdAt": "2026-06-01",
+      "updatedAt": "2026-08-20"
+    },
+    {
+      "id": "hpc-parallel",
+      "parentId": "hpc",
+      "name": "Parallel Programming",
+      "status": "learning",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-06-01",
+      "updatedAt": "2026-08-20"
+    },
+    {
+      "id": "hpc-openmp",
+      "parentId": "hpc-parallel",
+      "name": "OpenMP",
+      "status": "practicing",
+      "tags": [],
+      "notes": "Comfortable with parallel for and reductions. Still shaky on task-based parallelism.",
+      "resources": [
+        {
+          "label": "OpenMP specifications",
+          "url": "https://www.openmp.org/specifications/"
+        }
+      ],
+      "createdAt": "2026-06-05",
+      "updatedAt": "2026-08-20"
+    },
+    {
+      "id": "hpc-mpi",
+      "parentId": "hpc-parallel",
+      "name": "MPI",
+      "status": "learning",
+      "tags": [],
+      "notes": "Point-to-point makes sense; collectives need more practice.",
+      "resources": [],
+      "createdAt": "2026-07-01",
+      "updatedAt": "2026-08-18"
+    },
+    {
+      "id": "hpc-cuda",
+      "parentId": "hpc-parallel",
+      "name": "CUDA",
+      "status": "planned",
+      "tags": [
+        "gpu"
+      ],
+      "notes": "Next after MPI.",
+      "resources": [],
+      "createdAt": "2026-07-01",
+      "updatedAt": "2026-07-01"
+    },
+    {
+      "id": "hpc-arch",
+      "parentId": "hpc",
+      "name": "Computer Architecture",
+      "status": "learning",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-06-01",
+      "updatedAt": "2026-08-10"
+    },
+    {
+      "id": "hpc-cache",
+      "parentId": "hpc-arch",
+      "name": "Cache & Memory Hierarchy",
+      "status": "proficient",
+      "tags": [],
+      "notes": "Cache blocking on matmul gave a 4x speedup, and that made it click.",
+      "resources": [],
+      "createdAt": "2026-06-10",
+      "updatedAt": "2026-08-10"
+    },
+    {
+      "id": "hpc-simd",
+      "parentId": "hpc-arch",
+      "name": "SIMD & Vectorization",
+      "status": "practicing",
+      "tags": [],
+      "notes": "Auto-vectorization vs intrinsics.",
+      "resources": [],
+      "createdAt": "2026-06-20",
+      "updatedAt": "2026-08-05"
+    },
+    {
+      "id": "hpc-numa",
+      "parentId": "hpc-arch",
+      "name": "NUMA & Memory Affinity",
+      "status": "planned",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-07-15",
+      "updatedAt": "2026-07-15"
+    },
+    {
+      "id": "hpc-perf",
+      "parentId": "hpc",
+      "name": "Performance Engineering",
+      "status": "practicing",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-06-01",
+      "updatedAt": "2026-08-21"
+    },
+    {
+      "id": "hpc-profiling",
+      "parentId": "hpc-perf",
+      "name": "Profiling & Benchmarking",
+      "status": "practicing",
+      "tags": [],
+      "notes": "perf and hyperfine. Learned to pin CPU frequency before benchmarking.",
+      "resources": [],
+      "createdAt": "2026-06-15",
+      "updatedAt": "2026-08-21"
+    },
+    {
+      "id": "hpc-roofline",
+      "parentId": "hpc-perf",
+      "name": "Roofline Model",
+      "status": "learning",
+      "tags": [],
+      "notes": "Arithmetic intensity vs peak bandwidth.",
+      "resources": [],
+      "createdAt": "2026-08-01",
+      "updatedAt": "2026-08-21"
+    },
+    {
+      "id": "math",
+      "parentId": null,
+      "name": "Mathematics",
+      "status": "learning",
+      "tags": [],
+      "notes": "Building the theory that HPC and ML both lean on.",
+      "resources": [],
+      "createdAt": "2026-06-01",
+      "updatedAt": "2026-08-19"
+    },
+    {
+      "id": "math-prob",
+      "parentId": "math",
+      "name": "Probability & Statistics",
+      "status": "practicing",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-06-01",
+      "updatedAt": "2026-08-19"
+    },
+    {
+      "id": "math-rv",
+      "parentId": "math-prob",
+      "name": "Random Variables",
+      "status": "proficient",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-06-02",
+      "updatedAt": "2026-07-20"
+    },
+    {
+      "id": "math-dist",
+      "parentId": "math-prob",
+      "name": "Common Distributions",
+      "status": "practicing",
+      "tags": [],
+      "notes": "Normal, Poisson, Exponential. Keep re-deriving the Poisson limit.",
+      "resources": [],
+      "createdAt": "2026-06-10",
+      "updatedAt": "2026-08-19"
+    },
+    {
+      "id": "math-hypothesis",
+      "parentId": "math-prob",
+      "name": "Hypothesis Testing",
+      "status": "learning",
+      "tags": [],
+      "notes": "p-values, type I and II error, power.",
+      "resources": [],
+      "createdAt": "2026-07-05",
+      "updatedAt": "2026-08-19"
+    },
+    {
+      "id": "math-bayes",
+      "parentId": "math-prob",
+      "name": "Bayesian Inference",
+      "status": "planned",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-07-05",
+      "updatedAt": "2026-07-05"
+    },
+    {
+      "id": "math-analysis",
+      "parentId": "math",
+      "name": "Real Analysis",
+      "status": "learning",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-06-01",
+      "updatedAt": "2026-08-12"
+    },
+    {
+      "id": "math-seq",
+      "parentId": "math-analysis",
+      "name": "Sequences & Series",
+      "status": "practicing",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-06-15",
+      "updatedAt": "2026-08-12"
+    },
+    {
+      "id": "math-cont",
+      "parentId": "math-analysis",
+      "name": "Continuity & Limits",
+      "status": "learning",
+      "tags": [],
+      "notes": "Epsilon-delta proofs are still slow going.",
+      "resources": [],
+      "createdAt": "2026-07-10",
+      "updatedAt": "2026-08-12"
+    },
+    {
+      "id": "math-measure",
+      "parentId": "math-analysis",
+      "name": "Measure Theory",
+      "status": "planned",
+      "tags": [],
+      "notes": "Long-term goal.",
+      "resources": [],
+      "createdAt": "2026-07-10",
+      "updatedAt": "2026-07-10"
+    },
+    {
+      "id": "math-linalg",
+      "parentId": "math",
+      "name": "Linear Algebra",
+      "status": "practicing",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-06-01",
+      "updatedAt": "2026-08-08"
+    },
+    {
+      "id": "math-decomp",
+      "parentId": "math-linalg",
+      "name": "Matrix Decompositions",
+      "status": "learning",
+      "tags": [],
+      "notes": "LU, QR, SVD.",
+      "resources": [],
+      "createdAt": "2026-06-20",
+      "updatedAt": "2026-08-08"
+    },
+    {
+      "id": "math-numstab",
+      "parentId": "math-linalg",
+      "name": "Numerical Stability",
+      "status": "learning",
+      "tags": [],
+      "notes": "Conditioning and catastrophic cancellation.",
+      "resources": [],
+      "createdAt": "2026-07-20",
+      "updatedAt": "2026-08-08"
+    },
+    {
+      "id": "cpp",
+      "parentId": null,
+      "name": "C++",
+      "status": "practicing",
+      "tags": [
+        "language"
+      ],
+      "notes": "Primary language at the internship.",
+      "resources": [],
+      "createdAt": "2026-06-01",
+      "updatedAt": "2026-08-22"
+    },
+    {
+      "id": "cpp-core",
+      "parentId": "cpp",
+      "name": "Core Language",
+      "status": "practicing",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-06-01",
+      "updatedAt": "2026-08-22"
+    },
+    {
+      "id": "cpp-raii",
+      "parentId": "cpp-core",
+      "name": "RAII & Smart Pointers",
+      "status": "proficient",
+      "tags": [],
+      "notes": "unique_ptr by default, shared_ptr only when ownership is genuinely shared.",
+      "resources": [],
+      "createdAt": "2026-06-03",
+      "updatedAt": "2026-08-02"
+    },
+    {
+      "id": "cpp-move",
+      "parentId": "cpp-core",
+      "name": "Move Semantics",
+      "status": "practicing",
+      "tags": [],
+      "notes": "Rule of five, forwarding references.",
+      "resources": [],
+      "createdAt": "2026-06-12",
+      "updatedAt": "2026-08-22"
+    },
+    {
+      "id": "cpp-templates",
+      "parentId": "cpp-core",
+      "name": "Templates & Concepts",
+      "status": "learning",
+      "tags": [],
+      "notes": "SFINAE mostly replaced by concepts in C++20.",
+      "resources": [],
+      "createdAt": "2026-07-01",
+      "updatedAt": "2026-08-22"
+    },
+    {
+      "id": "cpp-stdlib",
+      "parentId": "cpp",
+      "name": "Standard Library",
+      "status": "practicing",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-06-01",
+      "updatedAt": "2026-08-15"
+    },
+    {
+      "id": "cpp-containers",
+      "parentId": "cpp-stdlib",
+      "name": "Containers",
+      "status": "proficient",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-06-05",
+      "updatedAt": "2026-07-28"
+    },
+    {
+      "id": "cpp-algorithms",
+      "parentId": "cpp-stdlib",
+      "name": "Algorithms",
+      "status": "practicing",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-06-05",
+      "updatedAt": "2026-08-15"
+    },
+    {
+      "id": "cpp-ranges",
+      "parentId": "cpp-stdlib",
+      "name": "Ranges",
+      "status": "planned",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-07-25",
+      "updatedAt": "2026-07-25"
+    },
+    {
+      "id": "cpp-tooling",
+      "parentId": "cpp",
+      "name": "Tooling",
+      "status": "learning",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-06-01",
+      "updatedAt": "2026-08-14"
+    },
+    {
+      "id": "cpp-cmake",
+      "parentId": "cpp-tooling",
+      "name": "CMake",
+      "status": "practicing",
+      "tags": [],
+      "notes": "Think in targets, not variables.",
+      "resources": [],
+      "createdAt": "2026-06-08",
+      "updatedAt": "2026-08-14"
+    },
+    {
+      "id": "cpp-sanitizers",
+      "parentId": "cpp-tooling",
+      "name": "Sanitizers & Valgrind",
+      "status": "learning",
+      "tags": [],
+      "notes": "ASan caught a real bug in week 3.",
+      "resources": [],
+      "createdAt": "2026-07-02",
+      "updatedAt": "2026-08-14"
+    },
+    {
+      "id": "cpp-gdb",
+      "parentId": "cpp-tooling",
+      "name": "Debugging with gdb",
+      "status": "learning",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-07-02",
+      "updatedAt": "2026-08-03"
+    },
+    {
+      "id": "swe",
+      "parentId": null,
+      "name": "Software Engineering",
+      "status": "practicing",
+      "tags": [],
+      "notes": "Day-to-day craft picked up on the job.",
+      "resources": [],
+      "createdAt": "2026-06-01",
+      "updatedAt": "2026-08-21"
+    },
+    {
+      "id": "swe-git",
+      "parentId": "swe",
+      "name": "Git & Version Control",
+      "status": "practicing",
+      "tags": [],
+      "notes": "Rebase vs merge, interactive rebase, bisect.",
+      "resources": [],
+      "createdAt": "2026-06-01",
+      "updatedAt": "2026-08-21"
+    },
+    {
+      "id": "swe-testing",
+      "parentId": "swe",
+      "name": "Testing",
+      "status": "learning",
+      "tags": [],
+      "notes": "Unit vs integration, GoogleTest.",
+      "resources": [],
+      "createdAt": "2026-06-10",
+      "updatedAt": "2026-08-11"
+    },
+    {
+      "id": "swe-ci",
+      "parentId": "swe",
+      "name": "CI/CD",
+      "status": "learning",
+      "tags": [],
+      "notes": "GitHub Actions basics.",
+      "resources": [],
+      "createdAt": "2026-07-01",
+      "updatedAt": "2026-08-06"
+    },
+    {
+      "id": "swe-linux",
+      "parentId": "swe",
+      "name": "Linux & Shell",
+      "status": "practicing",
+      "tags": [],
+      "notes": "",
+      "resources": [],
+      "createdAt": "2026-06-01",
+      "updatedAt": "2026-08-19"
+    }
+  ],
+  "sessions": [
+    {
+      "id": "s01",
+      "nodeId": "hpc-openmp",
+      "date": "2026-07-28",
+      "minutes": 90,
+      "note": "Parallel for and reduction on a Monte Carlo pi estimate."
+    },
+    {
+      "id": "s02",
+      "nodeId": "cpp-move",
+      "date": "2026-07-29",
+      "minutes": 60,
+      "note": "Wrote a small vector class to practice the rule of five."
+    },
+    {
+      "id": "s03",
+      "nodeId": "math-dist",
+      "date": "2026-07-30",
+      "minutes": 45,
+      "note": "Poisson as a limit of the binomial."
+    },
+    {
+      "id": "s04",
+      "nodeId": "hpc-cache",
+      "date": "2026-08-03",
+      "minutes": 120,
+      "note": "Cache-blocked matmul, measured with perf stat."
+    },
+    {
+      "id": "s05",
+      "nodeId": "cpp-cmake",
+      "date": "2026-08-05",
+      "minutes": 50,
+      "note": "Converted a project to target-based CMake."
+    },
+    {
+      "id": "s06",
+      "nodeId": "hpc-simd",
+      "date": "2026-08-06",
+      "minutes": 75,
+      "note": "Compared auto-vectorization against hand-written intrinsics."
+    },
+    {
+      "id": "s07",
+      "nodeId": "math-seq",
+      "date": "2026-08-10",
+      "minutes": 60,
+      "note": "Convergence tests."
+    },
+    {
+      "id": "s08",
+      "nodeId": "hpc-mpi",
+      "date": "2026-08-12",
+      "minutes": 100,
+      "note": "Ring send and recv, then collectives."
+    },
+    {
+      "id": "s09",
+      "nodeId": "swe-git",
+      "date": "2026-08-13",
+      "minutes": 40,
+      "note": "Used git bisect to find a performance regression."
+    },
+    {
+      "id": "s10",
+      "nodeId": "cpp-templates",
+      "date": "2026-08-17",
+      "minutes": 80,
+      "note": "Concepts and requires-clauses."
+    },
+    {
+      "id": "s11",
+      "nodeId": "math-hypothesis",
+      "date": "2026-08-19",
+      "minutes": 55,
+      "note": "Type I vs type II error, worked examples."
+    },
+    {
+      "id": "s12",
+      "nodeId": "hpc-roofline",
+      "date": "2026-08-21",
+      "minutes": 70,
+      "note": "Plotted arithmetic intensity for the matmul kernel."
+    },
+    {
+      "id": "s13",
+      "nodeId": "cpp-move",
+      "date": "2026-08-22",
+      "minutes": 45,
+      "note": "Forwarding references and std::forward."
+    }
+  ],
+  "focus": [
+    {
+      "id": "f01",
+      "date": "2026-08-21",
+      "text": "Plot the roofline for the matmul kernel",
+      "done": true,
+      "doneAt": "2026-08-21T18:40:00.000Z",
+      "nodeId": "hpc-roofline"
+    },
+    {
+      "id": "f02",
+      "date": "2026-08-21",
+      "text": "Re-read the arithmetic intensity section",
+      "done": true,
+      "doneAt": "2026-08-21T19:20:00.000Z",
+      "nodeId": "hpc-roofline"
+    },
+    {
+      "id": "f03",
+      "date": "2026-08-21",
+      "text": "Write up what the roofline showed",
+      "done": false,
+      "doneAt": null,
+      "nodeId": null
+    },
+    {
+      "id": "f04",
+      "date": "2026-08-22",
+      "text": "Practise std::forward until it sticks",
+      "done": true,
+      "doneAt": "2026-08-22T11:05:00.000Z",
+      "nodeId": "cpp-move"
+    },
+    {
+      "id": "f05",
+      "date": "2026-08-22",
+      "text": "Review the MPI collectives notes",
+      "done": false,
+      "doneAt": null,
+      "nodeId": "hpc-mpi"
+    }
+  ]
+}
