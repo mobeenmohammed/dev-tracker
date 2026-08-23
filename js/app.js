@@ -514,6 +514,27 @@
 
   /* ---------------- the extension handshake ---------------- */
 
+  /* The extension cannot read this page's storage, so what it needs is offered
+     to it: a compact digest of every solve, so a problem page can show your
+     history with that problem. Sent on load and after anything changes, which
+     is the only moment it can be — nothing can be pushed to a static page. */
+  function shareDigest() {
+    const send = () => {
+      try {
+        window.postMessage({ type: 'dev-tracker/digest', problems: Store.problemDigest() },
+                           location.origin === 'null' ? '*' : location.origin);
+      } catch { /* nothing is listening, which is the normal case */ }
+    };
+    send();
+
+    let pending = null;
+    Store.onChange(() => {
+      clearTimeout(pending);
+      pending = setTimeout(send, 800);
+    });
+  }
+
+
   /* A content script runs in its own world and cannot call window.DevTracker
      directly, so the browser extension offers solves by postMessage and this
      acknowledges exactly what was stored. Only same-window, same-origin
@@ -733,6 +754,7 @@
     };
 
     wireSolveBridge();
+    shareDigest();
 
     applyInspectorWidth();
     wireInspectorResizer();

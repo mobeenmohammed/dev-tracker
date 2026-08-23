@@ -863,14 +863,35 @@ const Store = (() => {
       if (incoming.level && !existing.level) existing.level = incoming.level;
       if (incoming.url && !existing.url) existing.url = incoming.url;
       if (incoming.solvedAt < existing.solvedAt) existing.solvedAt = incoming.solvedAt;
+      /* Whatever the person said about it this time is the newer claim. */
+      if (incoming.independence) existing.independence = incoming.independence;
+      applySolveActions(existing, data);
       persist();
       return { problem: existing, created: false };
     }
 
     if (!incoming.nodeId) incoming.nodeId = nodeForTags(incoming.tags);
     state.problems.push(incoming);
+    applySolveActions(incoming, data);
     persist();
     return { problem: incoming, created: true };
+  }
+
+  /* The extension's problem panel can say more than "solved": book a revisit,
+     or record that a problem was solved again. Those arrive alongside the
+     solve rather than as separate calls, because the page may only get one
+     chance to hand anything over. */
+  function applySolveActions(problem, data) {
+    if (!data) return;
+    if (Number(data.reviewInDays) > 0) {
+      problem.reviewOn = shiftDays(todayISO(), Number(data.reviewInDays));
+      if (problem.state === 'solved') problem.state = 'review';
+    }
+    if (data.revisit) {
+      problem.reviewedAt = todayISO();
+      problem.reviewOn = '';
+      problem.state = problem.state === 'resolved' ? 'mastered' : 'resolved';
+    }
   }
 
   function recordSolves(list) {
@@ -1050,6 +1071,23 @@ const Store = (() => {
     persist();
     return problem;
   }
+
+  /* A compact view of every solve, for the browser extension to show on the
+     problem page you are looking at. Only what a panel would display: no
+     notes, no tags, nothing the page does not need. */
+  const problemDigest = () => state.problems.map(p => ({
+    source: p.source,
+    problemId: p.problemId,
+    title: p.title,
+    solvedAt: p.solvedAt,
+    state: p.state,
+    independence: p.independence,
+    attempts: p.attempts,
+    mistake: p.mistake,
+    lesson: p.lesson,
+    reviewOn: p.reviewOn,
+    level: p.level,
+  }));
 
   const recentProblems = (limit = 10) =>
     state.problems.slice().sort((a, b) => b.solvedAt.localeCompare(a.solvedAt)).slice(0, limit);
@@ -1774,7 +1812,7 @@ const Store = (() => {
     PROBLEM_SOURCES, LEVELS, INDEPENDENCE, PROBLEM_STATES, allSources, addSource, sourceLabel,
     problemsToRevisit, scheduleReview, markRevisited,
     addProblem, updateProblem, deleteProblem, deleteProblemsFrom, recordSolve, recordSolves,
-    problemsMatching, problemsForNode, problemStats, recentProblems,
+    problemsMatching, problemsForNode, problemStats, recentProblems, problemDigest,
     evidenceFor, suggestedStatus,
     tagIndex, setTagMapping, nodeForTags,
     isPrivate, privateNodeIds,

@@ -27,6 +27,9 @@ const DEFAULTS = {
   queue: [],            // solves waiting for the tracker to be opened
   synced: 0,            // how many have made it across, for the options page
   questionCache: {},    // titleSlug -> tags and level, so each is looked up once
+  digest: {},           // source:problemId -> what the tracker knows about it
+  digestAt: '',         // when the tracker last shared it
+  widgetCollapsed: false,
 };
 
 const readSettings = async () => ({ ...DEFAULTS, ...(await chrome.storage.local.get(null)) });
@@ -239,22 +242,57 @@ chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
         respond(await sync({ manual: true, backfill: true }));
         break;
 
-      /* Project Euler cannot be polled, so its page hands solves in directly. */
+      /* Pages hand solves in directly: Project Euler because it cannot be
+         polled, and the widget because it captures how a solve went while it
+         is still fresh. */
       case 'log-solve': {
         const solve = msg.solve;
         if (!solve || !solve.problemId) { respond({ ok: false }); break; }
 
-        const settings = await readSettings();
-        const key = solve.source + ':' + solve.problemId;
-        const already = settings.queue.some(s => s.source + ':' + s.problemId === key);
+        const extra = msg.extra || {};
+        const enriched = { ...solve };
+        if (extra.reviewInDays) enriched.reviewInDays = extra.reviewInDays;
+        if (extra.revisit) enriched.revisit = true;
 
-        if (!already) {
-          const queue = [...settings.queue, solve];
-          await writeSettings({ queue });
-          await updateBadge(queue.length);
-          await notifySolves([solve]);
-        }
+        const settings = await readSettings();
+        const key = enriched.source + ':' + enriched.problemId;
+        const at = settings.queue.findIndex(s => s.source + ':' + s.problemId === key);
+
+        /* Saying more about a solve already queued should refine it rather
+           than being dropped as a duplicate. */
+        const queue = [...settings.queue];
+        const already = at >= 0;
+        if (already) queue[at] = { ...queue[at], ...enriched };
+        else queue.push(enriched);
+
+        await writeSettings({ queue });
+        await updateBadge(queue.length);
+        if (!already) await notifySolves([enriched]);
         respond({ ok: true, already });
+        break;
+      }
+
+      /* The tracker shares what it knows so a problem page can show it. */
+      case 'save-digest': {
+        const digest = {};
+        (msg.problems || []).forEach(p => {
+          if (p && p.source && p.problemId) {
+            digest[p.source + ':' + String(p.problemId).toLowerCase()] = p;
+          }
+        });
+        await writeSettings({ digest, digestAt: new Date().toISOString() });
+        respond({ ok: true, count: Object.keys(digest).length });
+        break;
+      }
+
+      case 'lookup-problem': {
+        const settings = await readSettings();
+        const id = msg.key ? msg.key.source + ':' + String(msg.key.problemId).toLowerCase() : '';
+        respond({
+          record: settings.digest[id] || null,
+          syncedAt: settings.digestAt,
+          collapsed: settings.widgetCollapsed,
+        });
         break;
       }
 

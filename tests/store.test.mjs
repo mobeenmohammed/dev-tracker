@@ -736,6 +736,48 @@ check('no applications, no chart', (() => {
   return [empty.total, empty.stages.length, empty.flows.length];
 })(), [0, 0, 0]);
 
+/* --- the digest the extension reads, and the actions it can send back --- */
+Store.importJSON(JSON.stringify({ nodes: [{ id: 'n', parentId: null, name: 'N' }] }));
+Store.recordSolve({ source: 'leetcode', problemId: 'two-sum', title: 'Two Sum',
+  tags: ['array'], level: 'easy', independence: 'hint', solvedAt: '2026-03-01' });
+Store.updateProblem(Store.problemsMatching()[0].id, { mistake: 'off-by-one', lesson: 'sort first', attempts: 3 });
+
+const digest = Store.problemDigest();
+check('every solve is offered',      digest.length, 1);
+check('keyed by source and id',      [digest[0].source, digest[0].problemId], ['leetcode', 'two-sum']);
+check('carrying how it went',        digest[0].independence, 'hint');
+check('and what went wrong',         [digest[0].mistake, digest[0].lesson], ['off-by-one', 'sort first']);
+check('and the attempts',            digest[0].attempts, 3);
+/* Only what a panel would show: no tags, no free notes. */
+check('nothing else is shared',      Object.keys(digest[0]).sort(),
+      ['attempts', 'independence', 'lesson', 'level', 'mistake', 'problemId', 'reviewOn',
+       'solvedAt', 'source', 'state', 'title']);
+
+/* A page can book a revisit while handing the solve over. */
+Store.recordSolve({ source: 'leetcode', problemId: 'two-sum', title: 'Two Sum', reviewInDays: 7 });
+check('a revisit can be booked from a page', Store.problemsMatching()[0].reviewOn,
+      Store.shiftDays(Store.todayISO(), 7));
+check('and it enters the queue',     Store.problemsMatching()[0].state, 'review');
+check('showing up as due',           Store.problemsToRevisit().length, 1);
+
+/* And say it was solved again. */
+Store.recordSolve({ source: 'leetcode', problemId: 'two-sum', title: 'Two Sum', revisit: true });
+check('a re-solve is recorded',      Store.problemsMatching()[0].state, 'resolved');
+check('clearing the booking',        Store.problemsMatching()[0].reviewOn, '');
+Store.recordSolve({ source: 'leetcode', problemId: 'two-sum', title: 'Two Sum', revisit: true });
+check('doing it twice is mastery',   Store.problemsMatching()[0].state, 'mastered');
+
+/* Saying how it went later replaces the earlier claim. */
+Store.recordSolve({ source: 'leetcode', problemId: 'two-sum', title: 'Two Sum', independence: 'independent' });
+check('the newer claim about help wins', Store.problemsMatching()[0].independence, 'independent');
+check('still only one solve',        Store.problemsMatching().length, 1);
+
+/* A brand new problem arriving with actions attached. */
+Store.recordSolve({ source: 'codeforces', problemId: '1234A', title: 'New One',
+                    independence: 'solution', reviewInDays: 3 });
+const fresh = Store.problemsMatching({ source: 'codeforces' })[0];
+check('a new solve takes its actions too', [fresh.state, fresh.independence], ['review', 'solution']);
+
 /* --- a broken parent link re-roots instead of vanishing --- */
 Store.importJSON(JSON.stringify({
   nodes: [{ id: 'orphan', parentId: 'does-not-exist', name: 'Orphan' }],

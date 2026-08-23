@@ -313,6 +313,35 @@ hourly check has enormous headroom.
 If you do want the twenty currently visible, the options page has a button for
 it. Otherwise LeetCode starts clean.
 
+### On the problem page
+
+While you are on a LeetCode or Codeforces problem, a small panel in the corner
+says what you already know about it:
+
+```
+Reverse Linked List
+  Solved 18 days ago with a hint
+  Booked for a revisit on 2026-09-04
+  Last time: off-by-one on the tail
+  Prefix sums avoid repeated work
+  [ Re-solved ]  [ Revisit in 7 days ]
+```
+
+If it is new to you, the panel offers **On my own / With a hint / Read
+solution** — recording how it went while that is still fresh, rather than
+trying to remember later.
+
+**How it knows.** The extension cannot read the tracker's storage: that lives
+on a different origin. So the tracker hands over a compact digest of your
+solves whenever you open it — dates, state, how much help, the mistake and the
+lesson, and nothing else. The panel says when that digest was last refreshed
+rather than pretending to be live. Anything you record there joins the same
+queue as a synced solve.
+
+Which problem you are looking at is worked out from the **URL** alone, so
+`/contest/1234/problem/A`, `/problemset/problem/1234/A` and `/gym/…` all
+resolve to the same problem, and neither site's markup can break it.
+
 **Removing synced solves.** *Remove all from…* in the Problems tab clears
 everything one source contributed; it appears once you filter to that source.
 The extension's *Reset sync position* is a different thing entirely: it clears
@@ -488,6 +517,7 @@ drive the page in tests.
 | `tests/extension.test.mjs` | Mapping Codeforces submissions to solves: verdict filtering, one entry per problem, incremental syncing, and the fields the API omits. |
 | `tests/leetcode.test.mjs` | Mapping LeetCode submissions to solves: the rolling window, string timestamps, enrichment from the question lookup, and errors returned inside a 200 response. |
 | `tests/euler.test.mjs` | Reading a Project Euler problem page: the number from the URL, and the fallbacks the title degrades through when markup changes. |
+| `tests/pagekey.test.mjs` | Identifying which problem a page is showing, across every URL shape each site uses. |
 
 
 

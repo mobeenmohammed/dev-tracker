@@ -624,6 +624,37 @@ await tick();
 check('a message from another origin is refused',
       !Store.problemsMatching().some(p => p.problemId === 'SPOOF'), 'a foreign origin got through');
 
+/* ---------- 7c-ter. the digest offered to the extension ---------- */
+// Stand in for the bridge: listen for what the page broadcasts.
+const nextDigest = (timeout = 1500) => new Promise(resolve => {
+  const onMessage = ev => {
+    if (!ev.data || ev.data.type !== 'dev-tracker/digest') return;
+    window.removeEventListener('message', onMessage);
+    resolve(ev.data);
+  };
+  window.addEventListener('message', onMessage);
+  setTimeout(() => { window.removeEventListener('message', onMessage); resolve(null); }, timeout);
+});
+
+// A change to a solve should be offered again, so the panel on a problem page
+// is not left showing something stale.
+const digestPromise = nextDigest();
+const known = Store.problemsMatching()[0];
+Store.updateProblem(known.id, { mistake: 'forgot the base case' });
+const shared = await digestPromise;
+
+check('the tracker offers a digest', !!shared, 'nothing was broadcast');
+check('covering every solve', shared && shared.problems.length === Store.problemsMatching().length,
+      shared && `${shared.problems.length} vs ${Store.problemsMatching().length}`);
+check('carrying what went wrong',
+      shared.problems.some(p => p.mistake === 'forgot the base case'));
+check('and how much help was needed',
+      shared.problems.every(p => 'independence' in p));
+check('but not the free-text notes',
+      shared.problems.every(p => !('notes' in p)), 'notes leaked into the digest');
+check('nor the tags',
+      shared.problems.every(p => !('tags' in p)));
+
 /* ---------- 7d. applications, and their privacy ---------- */
 click($$('.tab-fixed').find(t => t.dataset.view === 'apps'));
 check('applications view shown', !$('#view-apps').hidden);

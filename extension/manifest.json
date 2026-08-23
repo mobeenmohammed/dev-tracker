@@ -41,6 +41,17 @@
         "projecteuler.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://leetcode.com/problems/*",
+        "https://codeforces.com/*"
+      ],
+      "js": [
+        "pagekey.js",
+        "widget.js"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "options_page": "options.html",
