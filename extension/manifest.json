@@ -3,7 +3,11 @@
   "name": "Dev Tracker — problem sync",
   "version": "1.0.0",
   "description": "Records your accepted Codeforces and LeetCode submissions, with their tags and difficulty, into your Dev Tracker.",
-  "permissions": ["storage", "alarms"],
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications"
+  ],
   "host_permissions": [
     "https://codeforces.com/*",
     "https://leetcode.com/*",
@@ -22,12 +26,20 @@
         "http://localhost/*",
         "http://127.0.0.1/*"
       ],
-      "js": ["bridge.js"],
+      "js": [
+        "bridge.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "options_page": "options.html",
   "action": {
-    "default_title": "Dev Tracker — problem sync"
+    "default_title": "Dev Tracker — problem sync",
+    "default_icon": {
+      "128": "icon.png"
+    }
+  },
+  "icons": {
+    "128": "icon.png"
   }
 }

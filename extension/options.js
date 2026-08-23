@@ -20,6 +20,7 @@ function paint(state) {
   $('lcHandle').value = state.lcHandle || '';
   $('interval').value = state.intervalMinutes || 60;
   $('enabled').checked = state.enabled !== false;
+  $('notify').checked = state.notify !== false;
 
   $('queued').textContent = (state.queue || []).length;
   $('synced').textContent = state.synced || 0;
@@ -42,6 +43,7 @@ $('save').addEventListener('click', async () => {
       lcHandle: $('lcHandle').value.trim().replace(/^@/, ''),
       intervalMinutes: Math.max(15, Number($('interval').value) || 60),
       enabled: $('enabled').checked,
+      notify: $('notify').checked,
     },
   });
   paint(state);

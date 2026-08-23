@@ -153,7 +153,7 @@ check('inspector reports last worked', /last worked/.test($('#inspectorBody').te
 /* ---------- 3d. the inspector reads top to bottom in the right order ---------- */
 const headings = $$('#inspectorBody .insp-section h3').map(h => h.textContent.replace(/\s*\(.*/, ''));
 check('inspector section order', headings.join(' > ') ===
-      'What this is > Status > Resources & tasks > References > Progress > Time > Details > Actions',
+      'What this is > Status > Resources & tasks > References > Progress > Time > Journal > Details > Actions',
       headings.join(' > '));
 check('title comes first', $('#inspectorBody').firstElementChild.classList.contains('insp-head'));
 
@@ -705,6 +705,98 @@ check('no notes leak either', !/recruiter/.test(publicJson));
 check('they are in the private export', JSON.parse(Store.toPrivateJSON()).applications.length === 1);
 check('holding one counts as private data', Store.hasPrivateData() === true);
 check('the public export still carries the solves', JSON.parse(publicJson).problems.length > 0);
+
+/* ---------- 7e. the problem debrief and the revisit queue ---------- */
+click($$('.tab-fixed').find(t => t.dataset.view === 'problems'));
+/* A panel may already be open from an earlier step, and clicking a row
+   toggles, so open the first row deterministically. */
+const openFirstProblem = () => {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const row = $$('#problemList .problem-row')[0];
+    const next = row && row.nextElementSibling;
+    if (next && next.classList.contains('problem-detail')) return;
+    if (row) click(row.querySelector('.p-title'));
+  }
+};
+openFirstProblem();
+check('the debrief is offered', !!$('.debrief'));
+check('it asks how much help was needed', $$('.debrief [data-help]').length === 3);
+
+click($$('.debrief [data-help]').find(b => b.dataset.help === 'hint'));
+const debriefed = Store.problemsMatching()[0];
+check('help recorded from the panel', debriefed.independence === 'hint', String(debriefed.independence));
+
+$('#pd-mistake').value = 'off-by-one on the tail';
+fire($('#pd-mistake'), 'change');
+check('the mistake is saved', /off-by-one/.test(Store.problemsMatching()[0].mistake));
+$('#pd-lesson').value = 'prefix sums avoid repeated work';
+fire($('#pd-lesson'), 'change');
+check('the lesson is saved', /prefix sums/.test(Store.problemsMatching()[0].lesson));
+$('#pd-attempts').value = '3';
+fire($('#pd-attempts'), 'change');
+check('attempts are saved', Store.problemsMatching()[0].attempts === 3);
+
+$('#pd-review').value = '7';
+fire($('#pd-review'), 'change');
+check('a revisit can be booked', Store.problemsMatching()[0].state === 'review');
+check('the revisit block appears', !$('#revisitBlock').hidden);
+check('and lists it', $$('#revisitList .revisit-row').length === 1);
+check('saying why it is there', /hint|off-by-one/.test($('#revisitList .rv-why').textContent),
+      $('#revisitList .rv-why').textContent);
+check('the row shows its state', /Needs review/.test($('#problemList .p-state').textContent));
+
+click($('#revisitList [data-act="done"]'));
+check('re-solving clears it', $('#revisitBlock').hidden);
+check('and records the re-solve', Store.problemsMatching()[0].state === 'resolved');
+
+/* ---------- 7f. evidence in the inspector ---------- */
+Store.setTagMapping('dp', 'cpp-algorithms');
+Store.recordSolve({ source: 'leetcode', problemId: 'ev-1', title: 'Evidence One',
+  tags: ['dp'], level: 'medium', independence: 'independent', solvedAt: Store.todayISO() });
+Store.recordSolve({ source: 'leetcode', problemId: 'ev-2', title: 'Evidence Two',
+  tags: ['dp'], level: 'hard', independence: 'independent', solvedAt: Store.todayISO() });
+
+click(tabNamed('All'));
+clickNode('Algorithms');
+check('the inspector shows evidence', !!$('.evidence-facts'));
+check('it counts the solves', /problem/.test($('.evidence-facts').textContent));
+check('it lists recent ones', $$('.evidence-recent .er-row').length > 0);
+check('and flags independent solves', /without help/.test($('.evidence-facts').textContent));
+
+/* ---------- 7g. typed references and prerequisites ---------- */
+clickNode('Templates & Concepts');
+const typeSel = $('.ref-add [name="type"]');
+check('a reference can be typed', !!typeSel);
+typeSel.value = 'requires';
+$('.ref-add [name="target"]').value = 'cpp-move';
+$('.ref-add').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('the type is stored', Store.linksFor('cpp-templates').out[0].type === 'requires');
+check('the row reads as a sentence', /requires/.test($('.ref-row').textContent),
+      $('.ref-row')?.textContent);
+
+// a prerequisite nobody has started is called out
+Store.updateNode('cpp-templates', { status: 'learning' });
+Store.updateNode('cpp-move', { status: 'planned' });
+clickNode('Templates & Concepts');
+check('an unmet prerequisite is surfaced', !!$('.prereq-warning'));
+check('and names it', /Move Semantics/.test($('.prereq-warning').textContent),
+      $('.prereq-warning')?.textContent);
+
+/* ---------- 7h. journal and Obsidian ---------- */
+const jForm = $('.journal-add');
+jForm.querySelector('[name="text"]').value = 'Concepts replaced SFINAE for me today';
+jForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('a journal entry is stored', Store.journalFor('cpp-templates').length === 1);
+check('and rendered', $$('.journal-list .journal-row').length === 1);
+check('with its date', !!$('.journal-row .j-when').textContent.trim());
+
+$('#f-obsidian').value = 'My Vault/CS/Templates';
+fire($('#f-obsidian'), 'change');
+check('an obsidian path is saved', Store.byId('cpp-templates').obsidian === 'My Vault/CS/Templates');
+const openLink = $('.obsidian-row a');
+check('an open link appears', !!openLink);
+check('pointing at the vault', /^obsidian:\/\/open\?vault=My%20Vault/.test(openLink.getAttribute('href')),
+      openLink && openLink.getAttribute('href'));
 
 /* ---------- 8. stats still fine ---------- */
 click($$('.tab-fixed').find(t => t.dataset.view === 'stats'));

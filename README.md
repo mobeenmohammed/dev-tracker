@@ -46,7 +46,7 @@ the button on the canvas lays the whole thing out again.
 Positions are cached, so selecting a card or ticking something off never
 reshuffles the picture.
 
-### References
+### References and prerequisites
 
 The tree says where a topic *sits*; a reference says what it *relates to*.
 Probability relates to Randomised Algorithms without either owning the other,
@@ -59,6 +59,13 @@ the canvas hides them.
 
 A reference is public only when both of its ends are: link a public topic to a
 private one and the reference itself goes to the private file.
+
+Each reference says **how** the two relate — `relates to`, `requires`,
+`is part of`, `extends`, `is used by` — which is what makes it checkable rather
+than decorative. Mark Concurrency as requiring Processes, start Concurrency,
+and leave Processes untouched, and the inspector says so:
+
+> You are working on this, but Processes is still not started.
 
 ### The cards
 
@@ -127,6 +134,17 @@ status is yours to lower.
 There is no backend. The app keeps its working copy in `localStorage`, and
 `data/learning.json` is the versioned snapshot committed to the repo.
 
+### Journal and Obsidian
+
+Each topic takes short dated notes — somewhere to put *"finally understood why
+this works"* at the moment it happens, attached to the topic and the day.
+
+This is not a notes app and does not try to be. If you keep real notes in
+Obsidian, give a topic a vault path (`My Vault/CS/Linked Lists`) and the
+inspector shows an **Open** button that launches the note through the
+`obsidian://` URL scheme. The vault stays the source of truth; the tracker only
+points at it.
+
 ### Solved problems
 
 Solves are kept apart from time sessions, because a solve is a discrete event
@@ -154,6 +172,38 @@ manual — automatic tag-to-topic guessing is never quite right.
 
 Set a **problem target** on a topic and solves start counting towards its
 progress, which turns "proficient at DP" from a guess into a record.
+
+### What happened when you solved it
+
+Counting solved problems rewards volume. What actually moves the needle is
+going back to the ones that beat you, so each solve records a short debrief:
+
+| Field | Why it is there |
+| --- | --- |
+| How much help | "Solved" and "solved after reading the answer" are not the same claim |
+| Attempts | Three goes at something is a different experience from one |
+| How hard it felt | Independent of whatever the site rates it |
+| Where it went wrong | Off-by-one, wrong data structure — the pattern repeats |
+| What you took from it | The sentence worth remembering |
+| Revisit in | 3 days, a week, a month |
+
+Problems then move through **Solved → Needs review → Re-solved → Mastered**,
+and anything flagged or due surfaces in **Worth revisiting** at the top of the
+page, saying why it is there.
+
+### Evidence, and a status the record supports
+
+Because solves carry all of that, a topic's inspector can show what is actually
+known about it rather than only what you claimed:
+
+```
+12 solved   ·   90% without help   ·   5/4/3 easy/med/hard   ·   3 days ago
+```
+
+From that it offers a status — *"The record suggests Proficient: 12 problems
+solved, 90% without help"* — with a button to accept it. It only ever suggests
+moving **forwards**, and never changes anything on its own: you may know
+something the problem log does not.
 
 Solves can be added by hand, or imported in bulk from
 **Data ▸ Import solved problems**, which accepts an array of the shape above.
@@ -208,6 +258,9 @@ converted into each other.
 2. **Load unpacked**, and pick the `extension/` folder.
 3. Open its **Options**, enter your Codeforces handle and/or LeetCode
    username, and press **Sync now**.
+
+A desktop notification appears when a solve is found, which can be switched off
+in the same place.
 
 One site failing never stops the other: each is tried on its own and whatever
 went wrong is reported on the options page.

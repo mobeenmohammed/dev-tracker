@@ -307,6 +307,105 @@ check('holding an application counts as private data', Store.hasPrivateData(), t
 Store.deleteApplication(app.id);
 check('application deleted',         Store.applications().length, 0);
 
+/* --- the review cycle: what beat you is what is worth returning to --- */
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'll', parentId: null, name: 'Linked Lists' }],
+  tagMap: { 'linked list': 'll' },
+}));
+
+const solved = Store.recordSolve({ source: 'leetcode', problemId: 'reverse-linked-list',
+  title: 'Reverse Linked List', tags: ['linked list'], level: 'easy',
+  solvedAt: Store.shiftDays(Store.todayISO(), -18) }).problem;
+
+check('a solve starts as solved',      solved.state, 'solved');
+check('help is unrecorded until said', solved.independence, null);
+check('nothing to revisit yet',        Store.problemsToRevisit().length, 0);
+
+Store.updateProblem(solved.id, { independence: 'hint', attempts: 3, mistake: 'off-by-one',
+                                 lesson: 'check the tail pointer' });
+check('help recorded',   Store.problemsMatching()[0].independence, 'hint');
+check('attempts kept',   Store.problemsMatching()[0].attempts, 3);
+check('the mistake is kept', Store.problemsMatching()[0].mistake, 'off-by-one');
+
+/* Booking a revisit puts it in the queue and flags the state. */
+Store.scheduleReview(solved.id, 7);
+check('a review moves it to needs-review', Store.problemsMatching()[0].state, 'review');
+check('and it is listed',                  Store.problemsToRevisit().length, 1);
+check('the date is set',                   Store.problemsMatching()[0].reviewOn,
+                                           Store.shiftDays(Store.todayISO(), 7));
+
+Store.markRevisited(solved.id, { independent: true });
+check('re-solving clears the queue',   Store.problemsToRevisit().length, 0);
+check('and records it as re-solved',   Store.problemsMatching()[0].state, 'resolved');
+Store.markRevisited(solved.id, { independent: true });
+check('doing it again is mastery',     Store.problemsMatching()[0].state, 'mastered');
+check('mastered never returns to the queue', Store.problemsToRevisit().length, 0);
+
+/* A date that has come round surfaces on its own. */
+const due = Store.addProblem({ source: 'other', title: 'Old One', tags: ['linked list'] });
+Store.updateProblem(due.id, { reviewOn: Store.shiftDays(Store.todayISO(), -1) });
+check('an overdue review surfaces', Store.problemsToRevisit().map(p => p.id), [due.id]);
+
+/* --- evidence, and the status it would support --- */
+['a', 'b', 'c', 'd', 'e', 'f', 'g'].forEach((id, i) => Store.recordSolve({
+  source: 'leetcode', problemId: 'p-' + id, title: 'Problem ' + id,
+  tags: ['linked list'], level: i < 3 ? 'medium' : 'easy',
+  independence: 'independent', solvedAt: Store.todayISO(),
+}));
+const ev = Store.evidenceFor('ll');
+check('evidence counts the solves', ev.solved >= 8, true);
+check('it counts independent ones', ev.independent, 7);
+check('and reports the rate',       Math.round(ev.independenceRate * 100), 88);
+check('levels are broken down',     ev.byLevel.medium, 3);
+check('recent solves are listed',   ev.recent.length, 5);
+
+const suggestion = Store.suggestedStatus('ll');
+check('the evidence suggests a status', suggestion.status, 'proficient');
+check('and says why',                   /without help/.test(suggestion.because), true);
+Store.updateNode('ll', { status: 'mastered' });
+check('it never suggests going backwards', Store.suggestedStatus('ll'), null);
+
+/* --- typed references and prerequisites --- */
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'conc', parentId: null, name: 'Concurrency', status: 'learning' },
+    { id: 'proc', parentId: null, name: 'Processes', status: 'planned' },
+    { id: 'thr',  parentId: null, name: 'Threads', status: 'practicing' },
+  ],
+}));
+check('a link defaults to relates', Store.addLink('conc', 'thr').type, 'relates');
+check('a link can be typed',        Store.addLink('conc', 'proc', '', 'requires').type, 'requires');
+check('re-adding retypes it',       Store.addLink('conc', 'thr', '', 'extends').type, 'extends');
+check('an unknown type falls back', Store.addLink('thr', 'proc', '', 'nonsense').type, 'relates');
+
+const warnings = Store.prerequisiteWarnings();
+check('an unmet prerequisite is flagged', warnings.length, 1);
+check('it names the topic',   warnings[0].topic.id, 'conc');
+check('and what is missing',  warnings[0].needed.id, 'proc');
+Store.updateNode('proc', { status: 'learning' });
+check('starting it clears the warning', Store.prerequisiteWarnings().length, 0);
+
+/* --- journal and Obsidian --- */
+const entry = Store.addEntry('conc', '  finally understood happens-before  ');
+check('an entry is trimmed',      entry.text, 'finally understood happens-before');
+check('it is stamped with a time', typeof entry.at, 'string');
+check('blank entries are refused', Store.addEntry('conc', '   '), null);
+check('an entry for a missing topic is refused', Store.addEntry('nope', 'text'), null);
+check('entries are listed',       Store.journalFor('conc').length, 1);
+Store.updateEntry(entry.id, 'revised wording');
+check('an entry can be edited',   Store.journalFor('conc')[0].text, 'revised wording');
+Store.deleteEntry(entry.id);
+check('and removed',              Store.journalFor('conc').length, 0);
+
+Store.updateNode('conc', { obsidian: 'My Vault/CS/Concurrency' });
+check('an obsidian link is built',
+      Store.obsidianUrl(Store.byId('conc')),
+      'obsidian://open?vault=My%20Vault&file=CS%2FConcurrency');
+Store.updateNode('conc', { obsidian: 'Just A Note' });
+check('a bare note opens in the current vault',
+      Store.obsidianUrl(Store.byId('conc')), 'obsidian://open?file=Just%20A%20Note');
+check('no note, no link', Store.obsidianUrl(Store.byId('proc')), '');
+
 /* --- private branches stay out of the public snapshot --- */
 Store.importJSON(JSON.stringify({
   nodes: [

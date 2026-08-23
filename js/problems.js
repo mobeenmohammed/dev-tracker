@@ -24,6 +24,7 @@ const Problems = (() => {
 
   function render() {
     renderStats();
+    renderRevisit();
     renderSources();
     renderTags();
     renderList();
@@ -47,6 +48,51 @@ const Problems = (() => {
         <div class="label">${esc(c.label)}</div>
         <div class="sub">${esc(c.sub)}</div>
       </div>`).join('');
+  }
+
+  /* --- what is worth going back to --- */
+
+  /* Counting solved problems rewards volume. Coming back to the ones that beat
+     you is what actually moves the needle, so they get their own place. */
+  function renderRevisit() {
+    const box = document.getElementById('revisitList');
+    const block = document.getElementById('revisitBlock');
+    const due = Store.problemsToRevisit();
+
+    block.hidden = due.length === 0;
+    if (!due.length) return;
+
+    document.getElementById('revisitCount').textContent =
+      `${due.length} problem${due.length === 1 ? '' : 's'}`;
+
+    box.replaceChildren();
+    due.slice(0, 12).forEach(p => {
+      const row = document.createElement('div');
+      row.className = 'revisit-row';
+      const help = p.independence ? Store.INDEPENDENCE.find(i => i.id === p.independence) : null;
+
+      row.innerHTML = `
+        <span class="rv-title">${esc(p.title)}</span>
+        <span class="rv-why">${esc(Store.sourceLabel(p.source))}${
+          help && help.id !== 'independent' ? ' · ' + esc(help.label.toLowerCase()) : ''}${
+          p.mistake ? ' · ' + esc(p.mistake) : ''}</span>
+        <span class="rv-when">solved ${esc(Store.relativeDay(p.solvedAt))}</span>
+        <button class="btn btn-sm" data-act="open">Open</button>
+        <button class="btn btn-sm btn-primary" data-act="done">Re-solved</button>`;
+
+      row.querySelector('[data-act="open"]').addEventListener('click', () => {
+        filter.source = '';
+        filter.tag = '';
+        expandedId = p.id;
+        render();
+        document.getElementById('problemList').scrollIntoView({ block: 'nearest' });
+      });
+      row.querySelector('[data-act="done"]').addEventListener('click', () => {
+        Store.markRevisited(p.id, { independent: true });
+        onChanged();
+      });
+      box.appendChild(row);
+    });
   }
 
   /* --- the platform you are looking at --- */
@@ -180,6 +226,8 @@ const Problems = (() => {
       <span class="p-rating">${p.difficulty ? esc(p.difficulty)
         : p.level ? `<span class="level level-${esc(p.level)}">${esc(p.level)}</span>` : '—'}</span>
       <span class="p-felt" title="How hard it felt">${p.perceived ? '&#9679;'.repeat(p.perceived) : '—'}</span>
+      <span class="p-state state-${esc(p.state)}" title="${esc(p.independence || 'help not recorded')}">${
+        esc((Store.PROBLEM_STATES.find(st => st.id === p.state) || {}).label || p.state)}</span>
       <span class="p-node ${node ? '' : 'is-unmapped'}">${node ? esc(node.name) : 'unmapped'}</span>
       <span class="p-date">${esc(Store.relativeDay(p.solvedAt))}</span>`;
 
@@ -240,6 +288,44 @@ const Problems = (() => {
         <input type="text" id="pd-tags" list="tagOptions" value="${esc(p.tags.join(', '))}">
       </div>
 
+      <div class="debrief">
+        <div class="field">
+          <span class="field-label">Did you get there on your own?</span>
+          <div class="felt-picker">
+            ${Store.INDEPENDENCE.map(i =>
+              `<button class="felt-opt ${p.independence === i.id ? 'is-on' : ''}" data-help="${i.id}">${esc(i.label)}</button>`).join('')}
+          </div>
+        </div>
+
+        <div class="pd-grid">
+          <label class="field"><span>Attempts</span>
+            <input type="number" id="pd-attempts" min="0" step="1" value="${p.attempts || ''}"></label>
+          <label class="field"><span>State</span>
+            <select id="pd-state">
+              ${Store.PROBLEM_STATES.map(st =>
+                `<option value="${st.id}" ${st.id === p.state ? 'selected' : ''}>${st.label}</option>`).join('')}
+            </select></label>
+          <label class="field"><span>Revisit in</span>
+            <select id="pd-review">
+              <option value="">not scheduled</option>
+              <option value="3">3 days</option>
+              <option value="7">7 days</option>
+              <option value="14">2 weeks</option>
+              <option value="30">a month</option>
+            </select></label>
+        </div>
+
+        <div class="field">
+          <span class="field-label">Where it went wrong <span class="muted">(off-by-one, wrong data structure…)</span></span>
+          <input type="text" id="pd-mistake" value="${esc(p.mistake)}">
+        </div>
+        <div class="field">
+          <span class="field-label">What you took from it</span>
+          <input type="text" id="pd-lesson" value="${esc(p.lesson)}" placeholder="Prefix sums avoid repeated work">
+        </div>
+        ${p.reviewOn ? `<p class="muted review-when">Booked for a revisit on ${esc(p.reviewOn)}.</p>` : ''}
+      </div>
+
       <textarea id="pd-notes" placeholder="What was the idea? What did you miss the first time?">${esc(p.notes)}</textarea>
 
       <div class="pd-actions">
@@ -273,6 +359,25 @@ const Problems = (() => {
       Store.updateProblem(p.id, { nodeId: ev.target.value || null });
       onChanged();
     });
+    panel.querySelectorAll('[data-help]').forEach(btn =>
+      btn.addEventListener('click', () => {
+        const value = btn.dataset.help;
+        Store.updateProblem(p.id, { independence: p.independence === value ? null : value });
+        onChanged();
+      }));
+
+    panel.querySelector('#pd-attempts').addEventListener('change', ev => save({ attempts: ev.target.value }));
+    panel.querySelector('#pd-mistake').addEventListener('change', ev => save({ mistake: ev.target.value }));
+    panel.querySelector('#pd-lesson').addEventListener('change', ev => save({ lesson: ev.target.value }));
+    panel.querySelector('#pd-state').addEventListener('change', ev => {
+      Store.updateProblem(p.id, { state: ev.target.value });
+      onChanged();
+    });
+    panel.querySelector('#pd-review').addEventListener('change', ev => {
+      Store.scheduleReview(p.id, Number(ev.target.value) || 0);
+      onChanged();
+    });
+
     panel.querySelector('#pd-tags').addEventListener('blur', ev => {
       Store.updateProblem(p.id, { tags: ev.target.value.split(',').map(t => t.trim()).filter(Boolean) });
       onChanged();

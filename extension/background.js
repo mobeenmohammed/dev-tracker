@@ -23,6 +23,7 @@ const DEFAULTS = {
   lcStarted: false,     // whether the LeetCode watermark has been set yet
   lastRunAt: 0,
   lastError: '',
+  notify: true,         // a desktop notification when new solves are found
   queue: [],            // solves waiting for the tracker to be opened
   synced: 0,            // how many have made it across, for the options page
   questionCache: {},    // titleSlug -> tags and level, so each is looked up once
@@ -30,6 +31,35 @@ const DEFAULTS = {
 
 const readSettings = async () => ({ ...DEFAULTS, ...(await chrome.storage.local.get(null)) });
 const writeSettings = patch => chrome.storage.local.set(patch);
+
+/* A solve is worth knowing about when it lands, not only when the tracker is
+   next opened — the badge alone is easy to miss. */
+async function notifySolves(solves) {
+  if (!solves.length) return;
+  const { notify } = await readSettings();
+  if (notify === false) return;
+
+  const first = solves[0];
+  const others = solves.length - 1;
+  const title = solves.length === 1 ? 'Solve recorded' : `${solves.length} solves recorded`;
+  const message = solves.length === 1
+    ? `${first.title}${first.tags.length ? ' — ' + first.tags.slice(0, 3).join(', ') : ''}`
+    : `${first.title} and ${others} more`;
+
+  try {
+    await chrome.notifications.create('', {
+      type: 'basic',
+      iconUrl: 'icon.png',
+      title,
+      message,
+      contextMessage: 'Open the tracker to store them',
+      silent: true,
+    });
+  } catch {
+    /* Notifications can be switched off at the OS level; that is not an error
+       worth failing a sync over. */
+  }
+}
 
 async function updateBadge(queueLength) {
   await chrome.action.setBadgeText({ text: queueLength ? String(queueLength) : '' });
@@ -172,6 +202,7 @@ async function sync({ manual = false, backfill = false } = {}) {
   patch.lastError = problems.join(' · ');
   await writeSettings(patch);
   await updateBadge(queue.length);
+  await notifySolves(found);
 
   if (problems.length && !found.length) return { ok: false, error: patch.lastError };
   return { ok: true, found: found.length, queued: queue.length, warning: patch.lastError };

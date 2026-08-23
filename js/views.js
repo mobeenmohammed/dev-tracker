@@ -58,7 +58,12 @@ const Views = (() => {
     body.appendChild(inspChecklist(node));
     body.appendChild(inspReferences(node));
     body.appendChild(inspProgress(node));
+
+    const evidence = inspEvidence(node);
+    if (evidence) body.appendChild(evidence);
+
     body.appendChild(inspTime(node));
+    body.appendChild(inspJournal(node));
     body.appendChild(inspDetails(node));
     body.appendChild(inspActions(node));
   }
@@ -271,8 +276,14 @@ const Views = (() => {
 
       const el = document.createElement('div');
       el.className = 'ref-row';
+      const type = Store.LINK_TYPES.find(t => t.id === link.type) || Store.LINK_TYPES[0];
+      /* Read from this topic's side: outgoing says what it does, incoming says
+         what is done to it. */
+      const phrase = direction === 'out' ? type.phrase : `is ${type.id === 'requires' ? 'required by' : type.phrase.replace(/^is /, '')}`;
+
       el.innerHTML = `
         <span class="ref-dir" title="${direction === 'out' ? 'points at' : 'points here'}">${direction === 'out' ? '&rarr;' : '&larr;'}</span>
+        <span class="ref-type">${esc(phrase)}</span>
         <button class="ref-name">${esc(other.name)}</button>
         <span class="ref-label-text">${esc(link.label)}</span>
         <button class="task-del" title="Remove this reference" aria-label="Remove reference">&times;</button>`;
@@ -295,11 +306,23 @@ const Views = (() => {
     }
     sec.appendChild(list);
 
+    const blocking = Store.prerequisiteWarnings().filter(w => w.topic.id === node.id);
+    if (blocking.length) {
+      const warn = document.createElement('p');
+      warn.className = 'prereq-warning';
+      warn.textContent = `You are working on this, but ${blocking.map(w => w.needed.name).join(', ')} ` +
+        `${blocking.length === 1 ? 'is' : 'are'} still not started.`;
+      sec.appendChild(warn);
+    }
+
     /* Anything but itself is fair game — references cut across the hierarchy,
        which is the whole point of having them. */
     const form = document.createElement('form');
     form.className = 'ref-add';
     form.innerHTML = `
+      <select name="type" aria-label="How they relate">
+        ${Store.LINK_TYPES.map(t => `<option value="${t.id}">${t.label}</option>`).join('')}
+      </select>
       <select name="target" aria-label="Topic to reference">
         <option value="">Link to…</option>
         ${Store.state.nodes.filter(n => n.id !== node.id).map(n =>
@@ -311,7 +334,7 @@ const Views = (() => {
     form.addEventListener('submit', ev => {
       ev.preventDefault();
       const data = new FormData(form);
-      if (Store.addLink(node.id, data.get('target'), data.get('label'))) onChanged();
+      if (Store.addLink(node.id, data.get('target'), data.get('label'), data.get('type'))) onChanged();
     });
     sec.appendChild(form);
     return sec;
@@ -373,6 +396,123 @@ const Views = (() => {
         + (hardest ? `, hardest rated ${hardest}.` : '.');
       sec.appendChild(evidence);
     }
+    return sec;
+  }
+
+
+  /* --- evidence: what the solved problems actually say --- */
+  function inspEvidence(node) {
+    const evidence = Store.evidenceFor(node.id);
+    const suggestion = Store.suggestedStatus(node.id);
+    if (!evidence.solved && !suggestion) return null;
+
+    const sec = section('Evidence');
+
+    if (evidence.solved) {
+      const facts = document.createElement('div');
+      facts.className = 'evidence-facts';
+      const rate = evidence.independenceRate;
+      facts.innerHTML = `
+        <div><strong>${evidence.solved}</strong><span>problem${evidence.solved === 1 ? '' : 's'} solved</span></div>
+        <div><strong>${rate === null ? '—' : Math.round(rate * 100) + '%'}</strong><span>${rate === null ? 'help not recorded' : 'without help'}</span></div>
+        <div><strong>${evidence.byLevel.easy}/${evidence.byLevel.medium}/${evidence.byLevel.hard}</strong><span>easy / med / hard</span></div>
+        <div><strong>${evidence.lastSolvedAt ? esc(Store.relativeDay(evidence.lastSolvedAt)) : '—'}</strong><span>most recent</span></div>`;
+      sec.appendChild(facts);
+
+      if (evidence.needsRevisit) {
+        const flag = document.createElement('p');
+        flag.className = 'evidence-flag';
+        flag.textContent = `${evidence.needsRevisit} marked for revisiting.`;
+        sec.appendChild(flag);
+      }
+
+      const recent = document.createElement('div');
+      recent.className = 'evidence-recent';
+      recent.innerHTML = evidence.recent.map(p => `
+        <div class="er-row">
+          <span class="er-title">${esc(p.title)}</span>
+          ${p.level ? `<span class="level level-${esc(p.level)}">${esc(p.level)}</span>` : ''}
+          <span class="er-help ${p.independence === 'independent' ? 'is-good' : ''}">${
+            p.independence ? esc(Store.INDEPENDENCE.find(i => i.id === p.independence).label) : ''}</span>
+          <span class="er-when">${esc(Store.relativeDay(p.solvedAt))}</span>
+        </div>`).join('');
+      sec.appendChild(recent);
+    }
+
+    /* The status stays the person's to set; the evidence just makes a case. */
+    if (suggestion) {
+      const box = document.createElement('div');
+      box.className = 'suggestion';
+      box.innerHTML = `
+        <span>The record suggests <strong>${esc(suggestion.label)}</strong>
+          <small>${esc(suggestion.because)}</small></span>`;
+
+      const apply = document.createElement('button');
+      apply.className = 'btn btn-sm';
+      apply.textContent = 'Set it';
+      apply.addEventListener('click', () => {
+        Store.updateNode(node.id, { status: suggestion.status });
+        onChanged();
+      });
+      box.appendChild(apply);
+      sec.appendChild(box);
+    }
+    return sec;
+  }
+
+  /* --- journal: short dated notes, written where the thought happened --- */
+  function inspJournal(node) {
+    const entries = Store.journalFor(node.id);
+    const sec = section(`Journal${entries.length ? ` (${entries.length})` : ''}`);
+
+    const form = document.createElement('form');
+    form.className = 'journal-add';
+    form.innerHTML = `
+      <input type="text" name="text" placeholder="What just clicked?" aria-label="Journal entry" autocomplete="off">
+      <button class="btn btn-sm btn-primary" type="submit">Note</button>`;
+    form.addEventListener('submit', ev => {
+      ev.preventDefault();
+      const text = new FormData(form).get('text');
+      if (Store.addEntry(node.id, text)) onChanged();
+    });
+    sec.appendChild(form);
+
+    if (entries.length) {
+      const list = document.createElement('div');
+      list.className = 'journal-list';
+      entries.slice(0, 12).forEach(entry => {
+        const row = document.createElement('div');
+        row.className = 'journal-row';
+        const when = new Date(entry.at);
+        row.innerHTML = `
+          <span class="j-when" title="${esc(entry.at)}">${esc(formatDate(entry.at.slice(0, 10)))}</span>
+          <span class="j-text"></span>
+          <button class="task-del" title="Remove this note" aria-label="Remove note">&times;</button>`;
+        row.querySelector('.j-text').textContent = entry.text;
+        row.querySelector('.task-del').addEventListener('click', () => {
+          Store.deleteEntry(entry.id);
+          onChanged();
+        });
+        list.appendChild(row);
+      });
+      sec.appendChild(list);
+    }
+
+    /* Obsidian opens a note from a link, so the vault stays the real notes app
+       and this only points at it. */
+    const vault = document.createElement('div');
+    vault.className = 'field obsidian-field';
+    vault.innerHTML = `
+      <label for="f-obsidian">Obsidian note <span class="muted">(Vault/Path/Note)</span></label>
+      <div class="obsidian-row">
+        <input id="f-obsidian" type="text" value="${esc(node.obsidian)}" placeholder="My Vault/CS/Linked Lists">
+        ${node.obsidian ? `<a class="btn btn-sm" href="${esc(Store.obsidianUrl(node))}">Open</a>` : ''}
+      </div>`;
+    vault.querySelector('input').addEventListener('change', ev => {
+      Store.updateNode(node.id, { obsidian: ev.target.value });
+      onChanged();
+    });
+    sec.appendChild(vault);
     return sec;
   }
 

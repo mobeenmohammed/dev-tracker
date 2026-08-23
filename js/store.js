@@ -93,6 +93,8 @@ const Store = (() => {
       private:   !!n.private,
       /* Optional: how many solved problems count as knowing this topic. */
       problemTarget: Number(n.problemTarget) > 0 ? Number(n.problemTarget) : 0,
+      /* A vault note this topic corresponds to, opened through obsidian://. */
+      obsidian:  typeof n.obsidian === 'string' ? n.obsidian.trim() : '',
       createdAt: n.createdAt || todayISO(),
       updatedAt: n.updatedAt || n.createdAt || todayISO(),
     };
@@ -139,6 +141,10 @@ const Store = (() => {
 
     const problems = (Array.isArray(raw.problems) ? raw.problems : []).map(normalizeProblem);
 
+    const journal = (Array.isArray(raw.journal) ? raw.journal : [])
+      .map(normalizeEntry)
+      .filter(e => e.text && ids.has(e.nodeId));
+
     /* A reference to a topic that no longer exists is dropped, as is one that
        points at itself, and a pair is only kept once per direction. */
     const seenLinks = new Set();
@@ -174,6 +180,7 @@ const Store = (() => {
       problems,
       applications,
       links,
+      journal,
       tagMap,
       sources: (Array.isArray(raw.sources) ? raw.sources : [])
         .filter(x => x && x.id && x.label)
@@ -476,30 +483,106 @@ const Store = (() => {
     persist();
   }
 
+  /* ---------------- journal ---------------- */
+
+  /* Short, dated notes against a topic. Not a replacement for a real notes
+     app — somewhere to put "finally understood why this works" at the moment
+     it happens, so the thought is attached to the topic and the date. */
+  function normalizeEntry(e) {
+    return {
+      id:     String(e.id || uid('j')),
+      nodeId: String(e.nodeId),
+      at:     e.at || nowISO(),
+      text:   String(e.text || '').trim(),
+    };
+  }
+
+  function addEntry(nodeId, text) {
+    const entry = normalizeEntry({ id: uid('j'), nodeId, text, at: nowISO() });
+    if (!entry.text || !byId(nodeId)) return null;
+    state.journal.push(entry);
+    persist();
+    return entry;
+  }
+
+  function updateEntry(id, text) {
+    const entry = state.journal.find(e => e.id === id);
+    if (!entry) return null;
+    entry.text = String(text || '').trim();
+    persist();
+    return entry;
+  }
+
+  function deleteEntry(id) {
+    state.journal = state.journal.filter(e => e.id !== id);
+    persist();
+  }
+
+  /* Newest first, and a parent shows what was written anywhere beneath it. */
+  function journalFor(nodeId, includeDescendants = false) {
+    const ids = new Set([nodeId, ...(includeDescendants ? descendantsOf(nodeId).map(n => n.id) : [])]);
+    return state.journal
+      .filter(e => ids.has(e.nodeId))
+      .sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  }
+
+  /* Obsidian opens a note from a link, which is all the integration needed:
+     the vault stays the source of truth and the tracker just points at it. */
+  function obsidianUrl(node) {
+    if (!node || !node.obsidian) return '';
+    const raw = node.obsidian.trim();
+    if (raw.startsWith('obsidian://')) return raw;
+
+    /* "Vault/Some/Note" -> vault plus file; a bare path opens in whichever
+       vault is current. */
+    const slash = raw.indexOf('/');
+    if (slash > 0) {
+      const vault = raw.slice(0, slash);
+      const file = raw.slice(slash + 1);
+      return `obsidian://open?vault=${encodeURIComponent(vault)}&file=${encodeURIComponent(file)}`;
+    }
+    return `obsidian://open?file=${encodeURIComponent(raw)}`;
+  }
+
   /* ---------------- references between topics ---------------- */
 
   /* The tree says where a topic sits; references say what it relates to.
      Probability relates to Randomised Algorithms without either owning the
      other, and only a graph can express that. */
+  /* An edge that says how two topics relate carries far more than one that
+     only says they do. "Concurrency requires Processes" is checkable; "these
+     are related" is not. */
+  const LINK_TYPES = [
+    { id: 'relates',  label: 'relates to',  arrow: 'to',   phrase: 'relates to'  },
+    { id: 'requires', label: 'requires',    arrow: 'to',   phrase: 'requires'    },
+    { id: 'part-of',  label: 'is part of',  arrow: 'to',   phrase: 'is part of'  },
+    { id: 'extends',  label: 'extends',     arrow: 'to',   phrase: 'extends'     },
+    { id: 'used-by',  label: 'is used by',  arrow: 'to',   phrase: 'is used by'  },
+  ];
+  const LINK_TYPE_IDS = LINK_TYPES.map(t => t.id);
+
   function normalizeLink(l) {
     return {
       id:    String(l.id || uid('l')),
       from:  String(l.from),
       to:    String(l.to),
+      type:  LINK_TYPE_IDS.includes(l.type) ? l.type : 'relates',
       label: typeof l.label === 'string' ? l.label.trim() : '',
     };
   }
 
-  function addLink(from, to, label = '') {
+  function addLink(from, to, label = '', type = 'relates') {
     if (!from || !to || from === to) return null;
     if (!byId(from) || !byId(to)) return null;
-    /* One reference per pair per direction; re-adding just relabels it. */
+    /* One reference per pair per direction; re-adding updates it. */
     const existing = state.links.find(l => l.from === from && l.to === to);
     if (existing) {
-      if (label) { existing.label = label.trim(); persist(); }
+      if (label) existing.label = label.trim();
+      if (LINK_TYPE_IDS.includes(type)) existing.type = type;
+      persist();
       return existing;
     }
-    const link = normalizeLink({ id: uid('l'), from, to, label });
+    const link = normalizeLink({ id: uid('l'), from, to, label, type });
     state.links.push(link);
     persist();
     return link;
@@ -530,6 +613,24 @@ const Store = (() => {
                                 incoming: state.links.filter(l => l.to === nodeId) };
     return [...new Set([...out.map(l => l.to), ...incoming.map(l => l.from)])];
   };
+
+  /* Something being learned whose prerequisites have not been started is
+     worth saying out loud — it is the most common way study goes sideways. */
+  function prerequisiteWarnings() {
+    const inProgress = new Set(['learning', 'practicing']);
+    const notStarted = 'planned';
+    const out = [];
+
+    state.links.filter(l => l.type === 'requires').forEach(link => {
+      const topic = byId(link.from);
+      const needed = byId(link.to);
+      if (!topic || !needed) return;
+      if (!inProgress.has(topic.status)) return;
+      if (needed.status !== notStarted) return;
+      out.push({ topic, needed, linkId: link.id });
+    });
+    return out;
+  }
 
   /* ---------------- tag catalogue ---------------- */
 
@@ -574,6 +675,24 @@ const Store = (() => {
   /* Where a problem came from — a site, a course, a book, anything. */
   const LEVELS = ['easy', 'medium', 'hard'];
 
+  /* How much help it took. The point of recording this is that "solved" and
+     "solved after reading the answer" are not the same claim. */
+  const INDEPENDENCE = [
+    { id: 'independent', label: 'On my own', weight: 1.0 },
+    { id: 'hint',        label: 'With a hint', weight: 0.5 },
+    { id: 'solution',    label: 'Read the solution', weight: 0.0 },
+  ];
+  const INDEPENDENCE_BY_ID = Object.fromEntries(INDEPENDENCE.map(i => [i.id, i]));
+
+  /* Where a problem sits in the revisit cycle. */
+  const PROBLEM_STATES = [
+    { id: 'solved',   label: 'Solved'       },
+    { id: 'review',   label: 'Needs review' },
+    { id: 'resolved', label: 'Re-solved'    },
+    { id: 'mastered', label: 'Mastered'     },
+  ];
+  const PROBLEM_STATE_IDS = PROBLEM_STATES.map(s => s.id);
+
   const PROBLEM_SOURCES = [
     { id: 'leetcode',     label: 'LeetCode'            },
     { id: 'codeforces',   label: 'Codeforces'          },
@@ -608,6 +727,15 @@ const Store = (() => {
       minutes:   Math.max(0, Number(p.minutes) || 0),
       notes:     typeof p.notes === 'string' ? p.notes : '',
       nodeId:    p.nodeId ? String(p.nodeId) : null,
+
+      /* --- what actually happened when you solved it --- */
+      independence: INDEPENDENCE_BY_ID[p.independence] ? p.independence : null,
+      attempts:  Math.max(0, Number(p.attempts) || 0),
+      mistake:   typeof p.mistake === 'string' ? p.mistake : '',
+      lesson:    typeof p.lesson === 'string' ? p.lesson : '',
+      state:     PROBLEM_STATE_IDS.includes(p.state) ? p.state : 'solved',
+      reviewOn:  p.reviewOn ? String(p.reviewOn).slice(0, 10) : '',
+      reviewedAt: p.reviewedAt ? String(p.reviewedAt).slice(0, 10) : '',
     };
   }
 
@@ -741,6 +869,76 @@ const Store = (() => {
     });
   }
 
+  /* What the solved problems actually say about a topic. This is the
+     difference between "I think I am proficient at linked lists" and
+     "12 solved, 4 medium, 2 hard, 90% without help". */
+  function evidenceFor(nodeId) {
+    const list = problemsForNode(nodeId);
+    const rated = list.filter(p => p.independence);
+    const independent = list.filter(p => p.independence === 'independent').length;
+
+    const byLevel = LEVELS.reduce((acc, l) => ({ ...acc, [l]: list.filter(p => p.level === l).length }), {});
+    const hardest = list.reduce((max, p) => Math.max(max, p.difficulty || 0), 0);
+
+    return {
+      solved: list.length,
+      independent,
+      /* Only counts problems where you said how much help you took. */
+      independenceRate: rated.length ? independent / rated.length : null,
+      rated: rated.length,
+      byLevel,
+      hardest: hardest || null,
+      lastSolvedAt: list.reduce((max, p) => (p.solvedAt > max ? p.solvedAt : max), ''),
+      needsRevisit: list.filter(p => p.state === 'review').length,
+      recent: list.slice().sort((a, b) => b.solvedAt.localeCompare(a.solvedAt)).slice(0, 5),
+    };
+  }
+
+  /* A status the evidence would support, offered as a suggestion rather than
+     imposed: the person still decides, but they decide against a number.
+
+     Solving problems without help is the strongest signal there is, so it
+     leads; a finished checklist counts for less on its own, because reading
+     something is not the same as being able to use it. */
+  function suggestedStatus(nodeId) {
+    const node = byId(nodeId);
+    if (!node) return null;
+
+    const evidence = evidenceFor(nodeId);
+    const list = checklistOf(nodeId);
+    const rate = evidence.independenceRate;
+    const solid = evidence.byLevel.medium + evidence.byLevel.hard;
+
+    let suggestion = null;
+    let because = '';
+
+    if (evidence.solved >= 12 && rate !== null && rate >= 0.85 && solid >= 4) {
+      suggestion = 'mastered';
+      because = `${evidence.solved} problems solved, ${Math.round(rate * 100)}% without help`;
+    } else if (evidence.solved >= 6 && rate !== null && rate >= 0.6) {
+      suggestion = 'proficient';
+      because = `${evidence.solved} problems solved, ${Math.round(rate * 100)}% without help`;
+    } else if (evidence.solved >= 2) {
+      suggestion = 'practicing';
+      because = `${evidence.solved} problems solved`;
+    } else if (list.total && list.done === list.total) {
+      suggestion = 'practicing';
+      because = 'the checklist is finished, but no problems solved yet';
+    } else if (list.done > 0 || minutesFor(nodeId, false) > 0) {
+      suggestion = 'learning';
+      because = 'there is time logged against it';
+    }
+
+    if (!suggestion) return null;
+
+    const order = STATUSES.map(s => s.id);
+    /* Never suggest going backwards: the person may know something the
+       problem log does not. */
+    if (order.indexOf(suggestion) <= order.indexOf(node.status)) return null;
+
+    return { status: suggestion, label: STATUS_BY_ID[suggestion].label, because };
+  }
+
   function problemStats(filter = {}) {
     const list = problemsMatching(filter);
     const rated = list.filter(p => p.difficulty);
@@ -757,6 +955,41 @@ const Store = (() => {
       unmapped:  list.filter(p => !(p.nodeId || nodeForTags(p.tags))).length,
       levels:    LEVELS.reduce((acc, l) => ({ ...acc, [l]: list.filter(p => p.level === l).length }), {}),
     };
+  }
+
+  /* Anything explicitly flagged, or whose review date has come round. A
+     problem you needed the solution for is worth seeing again even if you
+     never set a date. */
+  function problemsToRevisit() {
+    const today = todayISO();
+    return state.problems
+      .filter(p => {
+        if (p.state === 'mastered') return false;
+        if (p.state === 'review') return true;
+        return p.reviewOn && p.reviewOn <= today;
+      })
+      .sort((a, b) => (a.reviewOn || a.solvedAt).localeCompare(b.reviewOn || b.solvedAt));
+  }
+
+  /* Booking a revisit is the whole point of noticing you struggled. */
+  function scheduleReview(id, days) {
+    const problem = state.problems.find(p => p.id === id);
+    if (!problem) return null;
+    problem.reviewOn = days > 0 ? shiftDays(todayISO(), Number(days)) : '';
+    if (days > 0 && problem.state === 'solved') problem.state = 'review';
+    persist();
+    return problem;
+  }
+
+  /* Coming back and solving it again is a different, stronger claim. */
+  function markRevisited(id, { independent = true } = {}) {
+    const problem = state.problems.find(p => p.id === id);
+    if (!problem) return null;
+    problem.reviewedAt = todayISO();
+    problem.reviewOn = '';
+    problem.state = independent && problem.state === 'resolved' ? 'mastered' : 'resolved';
+    persist();
+    return problem;
   }
 
   const recentProblems = (limit = 10) =>
@@ -1067,6 +1300,8 @@ const Store = (() => {
           return (mapped ? priv.has(mapped) : false) === wantPrivate;
         })
         .sort((a, b) => a.solvedAt.localeCompare(b.solvedAt)),
+      /* A journal entry follows the topic it was written against. */
+      journal: state.journal.filter(e => priv.has(e.nodeId) === wantPrivate),
       /* A reference is only public when both ends are. */
       links: state.links.filter(l =>
         (priv.has(l.from) || priv.has(l.to)) === wantPrivate),
@@ -1076,19 +1311,19 @@ const Store = (() => {
   }
 
   function toJSON() {
-    const { nodes, sessions, focus, problems, links } = partition(false);
+    const { nodes, sessions, focus, problems, links, journal } = partition(false);
     return JSON.stringify({
       version: state.version, updatedAt: state.updatedAt, profile: state.profile,
-      nodes, links, sessions, focus, problems,
+      nodes, links, sessions, focus, problems, journal,
       tagMap: state.tagMap, sources: state.sources,
     }, null, 2);
   }
 
   function toPrivateJSON() {
-    const { nodes, sessions, focus, problems, applications, links } = partition(true);
+    const { nodes, sessions, focus, problems, applications, links, journal } = partition(true);
     return JSON.stringify({
       version: state.version, updatedAt: state.updatedAt, private: true,
-      nodes, links, sessions, focus, problems, applications,
+      nodes, links, sessions, focus, problems, journal, applications,
     }, null, 2);
   }
 
@@ -1120,6 +1355,7 @@ const Store = (() => {
     const haveProblems = new Set(state.problems.map(x => x.id));
     const haveApps     = new Set(state.applications.map(x => x.id));
     const haveLinks    = new Set(state.links.map(x => x.id));
+    const haveJournal  = new Set(state.journal.map(x => x.id));
 
     const merged = normalize({
       version:  state.version,
@@ -1130,6 +1366,7 @@ const Store = (() => {
       problems: [...state.problems, ...(parsed.problems || []).filter(x => !haveProblems.has(String(x.id)))],
       applications: [...state.applications, ...(parsed.applications || []).filter(x => !haveApps.has(String(x.id)))],
       links:    [...state.links, ...(parsed.links || []).filter(x => !haveLinks.has(String(x.id)))],
+      journal:  [...state.journal, ...(parsed.journal || []).filter(x => !haveJournal.has(String(x.id)))],
       tagMap:   { ...(parsed.tagMap || {}), ...state.tagMap },
       sources:  state.sources,
     });
@@ -1168,12 +1405,15 @@ const Store = (() => {
     focusFor, focusDates, focusSummary, addTask, toggleTask, updateTask, deleteTask, carryOverTo,
     addNode, updateNode, deleteNode, addSession, deleteSession, updateProfile,
     addItem, toggleItem, updateItem, deleteItem, checklistOf,
-    PROBLEM_SOURCES, LEVELS, allSources, addSource, sourceLabel,
+    addEntry, updateEntry, deleteEntry, journalFor, obsidianUrl,
+    PROBLEM_SOURCES, LEVELS, INDEPENDENCE, PROBLEM_STATES, allSources, addSource, sourceLabel,
+    problemsToRevisit, scheduleReview, markRevisited,
     addProblem, updateProblem, deleteProblem, deleteProblemsFrom, recordSolve, recordSolves,
     problemsMatching, problemsForNode, problemStats, recentProblems,
+    evidenceFor, suggestedStatus,
     tagIndex, setTagMapping, nodeForTags,
     isPrivate, privateNodeIds,
-    addLink, updateLink, deleteLink, linksFor, relatedTo,
+    addLink, updateLink, deleteLink, linksFor, relatedTo, LINK_TYPES, prerequisiteWarnings,
     TAG_CATALOGUE, catalogueTags, knownTags,
     APP_STAGES, STAGE_BY_ID, applications, addApplication, updateApplication,
     deleteApplication, addApplicationEvent, deleteApplicationEvent, applicationStats,
