@@ -572,6 +572,8 @@ const Store = (() => {
   /* ---------------- solved problems ---------------- */
 
   /* Where a problem came from — a site, a course, a book, anything. */
+  const LEVELS = ['easy', 'medium', 'hard'];
+
   const PROBLEM_SOURCES = [
     { id: 'leetcode',     label: 'LeetCode'            },
     { id: 'codeforces',   label: 'Codeforces'          },
@@ -597,6 +599,9 @@ const Store = (() => {
       url:       p.url ? String(p.url) : '',
       tags:      Array.isArray(p.tags) ? [...new Set(p.tags.map(t => String(t).trim().toLowerCase()).filter(Boolean))] : [],
       difficulty: Number.isFinite(difficulty) && difficulty > 0 ? difficulty : null,
+      /* Some sites band problems instead of rating them; "Medium" and a
+         Codeforces 1600 are not the same claim, so they are kept apart. */
+      level:     LEVELS.includes(p.level) ? p.level : null,
       /* How hard it felt, 1 (easy) to 5 (brutal) — independent of any rating. */
       perceived: perceived >= 1 && perceived <= 5 ? Math.round(perceived) : null,
       solvedAt:  String(p.solvedAt || todayISO()).slice(0, 10),
@@ -658,6 +663,7 @@ const Store = (() => {
       /* Keep whatever the person wrote themselves. */
       existing.tags = [...new Set([...existing.tags, ...incoming.tags])];
       if (incoming.difficulty && !existing.difficulty) existing.difficulty = incoming.difficulty;
+      if (incoming.level && !existing.level) existing.level = incoming.level;
       if (incoming.url && !existing.url) existing.url = incoming.url;
       if (incoming.solvedAt < existing.solvedAt) existing.solvedAt = incoming.solvedAt;
       persist();
@@ -739,6 +745,7 @@ const Store = (() => {
       avgFelt:   felt.length ? felt.reduce((sum, p) => sum + p.perceived, 0) / felt.length : null,
       minutes:   list.reduce((sum, p) => sum + p.minutes, 0),
       unmapped:  list.filter(p => !(p.nodeId || nodeForTags(p.tags))).length,
+      levels:    LEVELS.reduce((acc, l) => ({ ...acc, [l]: list.filter(p => p.level === l).length }), {}),
     };
   }
 
@@ -1151,7 +1158,7 @@ const Store = (() => {
     focusFor, focusDates, focusSummary, addTask, toggleTask, updateTask, deleteTask, carryOverTo,
     addNode, updateNode, deleteNode, addSession, deleteSession, updateProfile,
     addItem, toggleItem, updateItem, deleteItem, checklistOf,
-    PROBLEM_SOURCES, allSources, addSource, sourceLabel,
+    PROBLEM_SOURCES, LEVELS, allSources, addSource, sourceLabel,
     addProblem, updateProblem, deleteProblem, recordSolve, recordSolves,
     problemsMatching, problemsForNode, problemStats, recentProblems,
     tagIndex, setTagMapping, nodeForTags,

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Dev Tracker — Codeforces sync</title>
+<title>Dev Tracker — problem sync</title>
 <style>
   :root {
     color-scheme: dark light;
@@ -54,18 +54,28 @@
 </head>
 <body>
 <main>
-  <h1>Codeforces sync</h1>
+  <h1>Problem sync</h1>
   <p class="lead">
-    Reads your accepted submissions from the public Codeforces API — no account,
-    no key, nothing scraped. Solves wait here until you next open the tracker.
+    Reads your accepted submissions from the public Codeforces and LeetCode
+    APIs — no account, no key, nothing scraped. Solves wait here until you next
+    open the tracker.
   </p>
 
   <fieldset>
-    <legend>Account</legend>
+    <legend>Accounts</legend>
     <label>
-      <span>Codeforces handle</span>
-      <input type="text" id="handle" placeholder="your_handle" autocomplete="off" spellcheck="false">
+      <span>Codeforces handle <small>(full history available)</small></span>
+      <input type="text" id="handle" placeholder="your_handle" autocomplete="off" spellcheck="off">
     </label>
+    <label>
+      <span>LeetCode username <small>(from now on only)</small></span>
+      <input type="text" id="lcHandle" placeholder="your_username" autocomplete="off" spellcheck="off">
+    </label>
+    <p class="note" style="margin-top:0">
+      LeetCode's public API only answers with your twenty most recent accepted
+      submissions, so anything solved before you set this up cannot be read.
+      The first check records where you are and starts from there.
+    </p>
     <label>
       <span>Check every (minutes, minimum 15)</span>
       <input type="number" id="interval" min="15" step="15" value="60">
@@ -87,13 +97,15 @@
       <dt>Waiting to hand over</dt><dd id="queued">—</dd>
       <dt>Handed over so far</dt><dd id="synced">—</dd>
       <dt>Last checked</dt><dd id="lastRun">never</dd>
-      <dt>Newest solve seen</dt><dd id="lastSolve">none</dd>
+      <dt>Newest Codeforces solve</dt><dd id="lastSolve">none</dd>
+      <dt>Newest LeetCode solve</dt><dd id="lcLastSolve">none</dd>
     </dl>
     <p class="note">
       Solves are handed to the tracker the next time you open it, and are only
       dropped from the queue once it confirms it stored them.
     </p>
     <div class="actions" style="margin-top:12px">
+      <button id="backfill">Pull my last 20 LeetCode solves</button>
       <button id="reset">Forget what has been synced</button>
     </div>
   </fieldset>

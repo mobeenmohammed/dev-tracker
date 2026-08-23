@@ -35,6 +35,8 @@ const Problems = (() => {
     const cards = [
       { value: s.total,    label: 'Problems solved', sub: `${s.thisWeek} in the last 7 days` },
       { value: s.hardest ?? '—', label: 'Hardest rating', sub: s.hardest ? 'by source rating' : 'no ratings yet' },
+      { value: `${s.levels.easy}/${s.levels.medium}/${s.levels.hard}`,
+        label: 'Easy / Medium / Hard', sub: 'where the source bands them' },
       { value: s.avgFelt ? s.avgFelt.toFixed(1) + '/5' : '—', label: 'Average difficulty', sub: 'how hard they felt' },
       { value: s.unmapped, label: 'Unmapped', sub: s.unmapped ? 'tags with no topic yet' : 'every solve counts' },
     ];
@@ -153,7 +155,8 @@ const Problems = (() => {
         ${p.notes ? '<span class="note-flag" title="Has notes">&#9998;</span>' : ''}
       </span>
       <span class="p-tags">${p.tags.map(t => `<span class="chip">${esc(t)}</span>`).join('') || '<span class="muted">no tags</span>'}</span>
-      <span class="p-rating">${p.difficulty ? esc(p.difficulty) : '—'}</span>
+      <span class="p-rating">${p.difficulty ? esc(p.difficulty)
+        : p.level ? `<span class="level level-${esc(p.level)}">${esc(p.level)}</span>` : '—'}</span>
       <span class="p-felt" title="How hard it felt">${p.perceived ? '&#9679;'.repeat(p.perceived) : '—'}</span>
       <span class="p-node ${node ? '' : 'is-unmapped'}">${node ? esc(node.name) : 'unmapped'}</span>
       <span class="p-date">${esc(Store.relativeDay(p.solvedAt))}</span>`;
@@ -181,8 +184,16 @@ const Problems = (() => {
           <input type="number" id="pd-mins" min="0" step="5" value="${p.minutes || ''}">
         </label>
         <label class="field">
-          <span>Rating <span class="muted">(from the site)</span></span>
+          <span>Rating <span class="muted">(numeric, e.g. Codeforces)</span></span>
           <input type="number" id="pd-rating" min="0" step="100" value="${p.difficulty || ''}">
+        </label>
+        <label class="field">
+          <span>Level <span class="muted">(banded, e.g. LeetCode)</span></span>
+          <select id="pd-level">
+            <option value="">—</option>
+            ${Store.LEVELS.map(l =>
+              `<option value="${l}" ${l === p.level ? 'selected' : ''}>${l[0].toUpperCase() + l.slice(1)}</option>`).join('')}
+          </select>
         </label>
         <label class="field">
           <span>Counts towards</span>
@@ -232,6 +243,10 @@ const Problems = (() => {
     panel.querySelector('#pd-date').addEventListener('change', ev => save({ solvedAt: ev.target.value }));
     panel.querySelector('#pd-mins').addEventListener('change', ev => save({ minutes: ev.target.value }));
     panel.querySelector('#pd-rating').addEventListener('change', ev => save({ difficulty: ev.target.value }));
+    panel.querySelector('#pd-level').addEventListener('change', ev => {
+      Store.updateProblem(p.id, { level: ev.target.value || null });
+      onChanged();
+    });
     panel.querySelector('#pd-node').addEventListener('change', ev => {
       Store.updateProblem(p.id, { nodeId: ev.target.value || null });
       onChanged();

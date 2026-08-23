@@ -7,20 +7,25 @@
    ============================================================ */
 
 import { statusUrl, toSolves, readResponse, newestTimestamp } from './codeforces.js';
+import * as LeetCode from './leetcode.js';
 
 const ALARM = 'codeforces-sync';
 const PAGE_SIZE = 500;
 const MAX_PAGES = 20;          // ~10k submissions is far past any first sync
 
 const DEFAULTS = {
-  handle: '',
+  handle: '',           // Codeforces
+  lcHandle: '',         // LeetCode
   intervalMinutes: 60,
   enabled: true,
-  lastSyncedAt: 0,      // unix seconds of the newest solve already queued
+  lastSyncedAt: 0,      // unix seconds of the newest Codeforces solve already queued
+  lcLastSyncedAt: 0,    // the same watermark for LeetCode
+  lcStarted: false,     // whether the LeetCode watermark has been set yet
   lastRunAt: 0,
   lastError: '',
   queue: [],            // solves waiting for the tracker to be opened
   synced: 0,            // how many have made it across, for the options page
+  questionCache: {},    // titleSlug -> tags and level, so each is looked up once
 };
 
 const readSettings = async () => ({ ...DEFAULTS, ...(await chrome.storage.local.get(null)) });
@@ -58,36 +63,118 @@ async function collectSubmissions(handle, since) {
   return all;
 }
 
-async function sync({ manual = false } = {}) {
+/* ---------------- LeetCode ---------------- */
+
+async function graphql(body) {
+  const res = await fetch(LeetCode.API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 429) throw new Error('LeetCode is rate-limiting us. It will try again next time.');
+  if (!res.ok) throw new Error(`LeetCode replied ${res.status}.`);
+  return res.json();
+}
+
+/* The submission list carries no tags or difficulty, so each new problem is
+   looked up once and remembered. */
+async function enrich(solves, cache) {
+  const out = [];
+  for (const solve of solves) {
+    let question = cache[solve.problemId];
+    if (!question) {
+      try {
+        const data = LeetCode.readGraphQL(await graphql(LeetCode.questionQuery(solve.problemId)));
+        question = data.question || null;
+        if (question) cache[solve.problemId] = question;
+      } catch {
+        question = null;         // a missing lookup is not worth losing the solve over
+      }
+      await new Promise(r => setTimeout(r, 350));   // be a polite guest
+    }
+    out.push(LeetCode.applyQuestion(solve, question));
+  }
+  return out;
+}
+
+/* Nothing solved before the extension was installed is available anyway, so
+   the first run records where we are and imports nothing. `backfill` overrides
+   that for someone who does want the visible window. */
+async function syncLeetCode(settings, { backfill = false } = {}) {
+  if (!settings.lcHandle) return { solves: [], watermark: settings.lcLastSyncedAt, started: settings.lcStarted };
+
+  const payload = await graphql(LeetCode.recentQuery(settings.lcHandle));
+  const submissions = LeetCode.readRecent(payload);
+  const newest = submissions.reduce((max, s) => Math.max(max, Number(s.timestamp) || 0), 0);
+
+  if (!settings.lcStarted && !backfill) {
+    return { solves: [], watermark: newest, started: true };
+  }
+
+  const since = backfill ? 0 : settings.lcLastSyncedAt;
+  const fresh = LeetCode.toSolves(submissions, { since });
+  const cache = { ...settings.questionCache };
+  const enriched = await enrich(fresh, cache);
+
+  return {
+    solves: enriched,
+    watermark: Math.max(settings.lcLastSyncedAt, newest),
+    started: true,
+    cache,
+  };
+}
+
+async function sync({ manual = false, backfill = false } = {}) {
   const settings = await readSettings();
-  if (!settings.handle) {
-    await writeSettings({ lastError: 'No Codeforces handle set yet.' });
-    return { ok: false, error: 'No Codeforces handle set yet.' };
+  if (!settings.handle && !settings.lcHandle) {
+    const error = 'No Codeforces or LeetCode username set yet.';
+    await writeSettings({ lastError: error });
+    return { ok: false, error };
   }
   if (!settings.enabled && !manual) return { ok: false, error: 'Syncing is paused.' };
 
-  try {
-    const submissions = await collectSubmissions(settings.handle, settings.lastSyncedAt);
-    const solves = toSolves(submissions, { since: settings.lastSyncedAt });
+  const patch = { lastRunAt: Math.floor(Date.now() / 1000) };
+  const found = [];
+  const problems = [];
 
-    /* Anything already queued stays queued; the tracker deduplicates again on
-       its own side, so a repeat here is harmless rather than corrupting. */
-    const queued = new Map(settings.queue.map(s => [s.problemId, s]));
-    solves.forEach(s => queued.set(s.problemId, s));
-    const queue = [...queued.values()];
-
-    await writeSettings({
-      queue,
-      lastSyncedAt: Math.max(settings.lastSyncedAt, newestTimestamp(solves)),
-      lastRunAt: Math.floor(Date.now() / 1000),
-      lastError: '',
-    });
-    await updateBadge(queue.length);
-    return { ok: true, found: solves.length, queued: queue.length };
-  } catch (err) {
-    await writeSettings({ lastError: err.message, lastRunAt: Math.floor(Date.now() / 1000) });
-    return { ok: false, error: err.message };
+  /* One source failing must not stop the other, so each is tried on its own
+     and whatever went wrong is reported rather than thrown away. */
+  if (settings.handle) {
+    try {
+      const submissions = await collectSubmissions(settings.handle, settings.lastSyncedAt);
+      const solves = toSolves(submissions, { since: settings.lastSyncedAt });
+      patch.lastSyncedAt = Math.max(settings.lastSyncedAt, newestTimestamp(solves));
+      found.push(...solves);
+    } catch (err) {
+      problems.push('Codeforces: ' + err.message);
+    }
   }
+
+  if (settings.lcHandle) {
+    try {
+      const result = await syncLeetCode(settings, { backfill });
+      patch.lcLastSyncedAt = result.watermark;
+      patch.lcStarted = result.started;
+      if (result.cache) patch.questionCache = result.cache;
+      found.push(...result.solves);
+    } catch (err) {
+      problems.push('LeetCode: ' + err.message);
+    }
+  }
+
+  /* Anything already queued stays queued; the tracker deduplicates again on
+     its own side, so a repeat here is harmless rather than corrupting. */
+  const queued = new Map(settings.queue.map(s => [s.source + ':' + s.problemId, s]));
+  found.forEach(s => queued.set(s.source + ':' + s.problemId, s));
+  const queue = [...queued.values()];
+
+  patch.queue = queue;
+  patch.lastError = problems.join(' · ');
+  await writeSettings(patch);
+  await updateBadge(queue.length);
+
+  if (problems.length && !found.length) return { ok: false, error: patch.lastError };
+  return { ok: true, found: found.length, queued: queue.length, warning: patch.lastError };
 }
 
 /* ---------------- scheduling ---------------- */
@@ -113,6 +200,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
     switch (msg && msg.type) {
       case 'sync-now':
         respond(await sync({ manual: true }));
+        break;
+
+      /* Deliberately pulls the visible LeetCode window, for someone who wants
+         the twenty most recent rather than a clean start. */
+      case 'backfill-leetcode':
+        respond(await sync({ manual: true, backfill: true }));
         break;
 
       case 'get-state':
@@ -145,7 +238,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
       }
 
       case 'reset-sync':
-        await writeSettings({ lastSyncedAt: 0, queue: [], lastError: '' });
+        await writeSettings({ lastSyncedAt: 0, lcLastSyncedAt: 0, lcStarted: false, queue: [], lastError: '' });
         await updateBadge(0);
         respond(await readSettings());
         break;

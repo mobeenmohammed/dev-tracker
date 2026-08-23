@@ -1370,3 +1370,15 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   color: var(--text-faint);
   line-height: 1.45;
 }
+
+/* banded difficulty, as LeetCode and similar sites report it */
+.level {
+  font-size: 10px;
+  text-transform: capitalize;
+  border-radius: 999px;
+  padding: 1px 7px;
+  border: 1px solid currentColor;
+}
+.level-easy   { color: var(--st-mastered); }
+.level-medium { color: var(--st-learning); }
+.level-hard   { color: var(--danger); }

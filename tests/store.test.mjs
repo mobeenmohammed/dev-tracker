@@ -218,6 +218,21 @@ const bulk = Store.recordSolves([
 ]);
 check('bulk import counts new and known', bulk, { added: 1, updated: 1 });
 
+/* Banded levels and numeric ratings are different claims. */
+Store.recordSolve({ source: 'leetcode', problemId: 'two-sum', title: 'Two Sum',
+                    tags: ['array'], level: 'easy', solvedAt: '2026-05-04' });
+check('a level is kept',             Store.problemsMatching({ source: 'leetcode' })[0].level, 'easy');
+check('and carries no fake rating',  Store.problemsMatching({ source: 'leetcode' })[0].difficulty, null);
+check('an invalid level is dropped',
+      Store.addProblem({ source: 'other', title: 'X', level: 'impossible' }).level, null);
+check('levels are counted',          Store.problemStats().levels.easy, 1);
+Store.deleteProblem(Store.problemsMatching({ source: 'other' })[0].id);
+
+/* A solve seen again can gain a level it did not have. */
+Store.recordSolve({ source: 'leetcode', problemId: 'two-sum', title: 'Two Sum', level: 'medium' });
+check('an existing level is not overwritten',
+      Store.problemsMatching({ source: 'leetcode' })[0].level, 'easy');
+
 /* Tags only become evidence about a topic once they are mapped onto it. */
 check('unmapped tags point nowhere',  Store.nodeForTags(['dp']), null);
 Store.setTagMapping('dp', 'dp');

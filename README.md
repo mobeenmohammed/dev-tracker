@@ -161,26 +161,54 @@ The page also exposes `window.DevTracker.recordSolves([…])`, which is the
 surface a browser extension will write through; repeat solves are matched on
 `source` + `problemId` and never duplicated.
 
-### Syncing solves from Codeforces
+### Syncing solves automatically
 
-`extension/` holds a Chrome extension (Manifest V3) that records your accepted
-Codeforces submissions, with their tags and ratings, into the tracker.
+`extension/` holds a Chrome extension (Manifest V3) that records accepted
+submissions, with their tags and difficulty, into the tracker.
 
-Codeforces is the only platform synced automatically, on purpose. It has a real
-public API — `user.status`, no account and no key — so nothing is scraped and
-nothing breaks when the site is redesigned. LeetCode and CSES would need DOM
-observation, which rots silently every time they ship a redesign.
+Both supported sites are read through **public APIs that need no account and no
+key**, so nothing is scraped and a redesign cannot break the sync:
+
+| Site | Endpoint | History available |
+| --- | --- | --- |
+| Codeforces | `user.status` | Everything, back to your first submission |
+| LeetCode | GraphQL `recentAcSubmissionList` | Only a rolling window of your 20 most recent |
+
+**What the LeetCode window means.** Each call returns the twenty most recent
+accepted submissions *as of that moment* — asking for fifty still returns
+twenty. It is a window that slides forward, not a cap on the total: poll it
+regularly and everything new is captured, since solves are matched on
+`source` + `problemId` and never duplicated. Two consequences follow. Nothing
+solved **before** you set it up can be read, so the first check simply records
+where you are and starts from there. And if you ever solved more than twenty
+problems between two checks, the ones in the middle would fall out of the
+window — for reference, twenty solves spans weeks at a typical pace, so an
+hourly check has enormous headroom.
+
+If you do want the twenty currently visible, the options page has a button for
+it. Otherwise LeetCode starts clean.
+
+LeetCode's submission list carries no tags or difficulty, so each new problem
+is looked up once through the same public API and cached.
+
+**Ratings and levels are not the same claim.** Codeforces rates a problem 1600;
+LeetCode bands it Medium. They are stored in separate fields and never
+converted into each other.
 
 **Installing it**
 
 1. Open `chrome://extensions`, turn on **Developer mode**.
 2. **Load unpacked**, and pick the `extension/` folder.
-3. Open its **Options**, enter your Codeforces handle, and press **Sync now**.
+3. Open its **Options**, enter your Codeforces handle and/or LeetCode
+   username, and press **Sync now**.
+
+One site failing never stops the other: each is tried on its own and whatever
+went wrong is reported on the options page.
 
 **How a solve reaches the tracker**
 
 ```
-service worker polls user.status
+service worker polls both sites
    -> accepted submissions become solves, queued in extension storage
    -> you open the tracker
    -> content script offers the queue by postMessage
@@ -320,11 +348,7 @@ drive the page in tests.
 | `tests/browser/boot.test.mjs` | Starting up from saved state, including a field deleted since the last visit. |
 | `tests/browser/styles.test.mjs` | That nothing marked `hidden` is still displayed — a real bug once left an invisible overlay covering the canvas. |
 | `tests/extension.test.mjs` | Mapping Codeforces submissions to solves: verdict filtering, one entry per problem, incremental syncing, and the fields the API omits. |
-
-LeetCode is not synced yet. It has a public GraphQL endpoint
-(`recentAcSubmissionList`) that returns roughly the twenty most recent accepted
-submissions, which is a far more durable path than scraping the page; full
-history needs an extension reading the signed-in account.
+| `tests/leetcode.test.mjs` | Mapping LeetCode submissions to solves: the rolling window, string timestamps, enrichment from the question lookup, and errors returned inside a 200 response. |
 
 
 
@@ -352,7 +376,7 @@ js/problems.js        the Problems view and solve import
 js/applications.js    the Applications view (private data)
 js/app.js             bootstrap, view switching, import/export, shortcuts
 data/learning.json    the committed snapshot
-extension/            Chrome extension that syncs Codeforces solves
+extension/            Chrome extension that syncs Codeforces and LeetCode solves
 tests/                data model, extension and browser tests
 .github/workflows/    test-and-deploy pipeline
 ```

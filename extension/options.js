@@ -17,6 +17,7 @@ function setStatus(text, kind = '') {
 
 function paint(state) {
   $('handle').value = state.handle || '';
+  $('lcHandle').value = state.lcHandle || '';
   $('interval').value = state.intervalMinutes || 60;
   $('enabled').checked = state.enabled !== false;
 
@@ -24,6 +25,7 @@ function paint(state) {
   $('synced').textContent = state.synced || 0;
   $('lastRun').textContent = fmtTime(state.lastRunAt);
   $('lastSolve').textContent = fmtTime(state.lastSyncedAt);
+  $('lcLastSolve').textContent = state.lcStarted ? fmtTime(state.lcLastSyncedAt) : 'not started';
 
   if (state.lastError) setStatus(state.lastError, 'bad');
 }
@@ -37,6 +39,7 @@ $('save').addEventListener('click', async () => {
     type: 'save-settings',
     settings: {
       handle: $('handle').value.trim(),
+      lcHandle: $('lcHandle').value.trim().replace(/^@/, ''),
       intervalMinutes: Math.max(15, Number($('interval').value) || 60),
       enabled: $('enabled').checked,
     },
@@ -49,12 +52,23 @@ $('syncNow').addEventListener('click', async () => {
   setStatus('Checking Codeforces…');
   const result = await send({ type: 'sync-now' });
   if (result.ok) {
-    setStatus(result.found
+    const summary = result.found
       ? `Found ${result.found} new solve${result.found === 1 ? '' : 's'}.`
-      : 'Nothing new.', 'good');
+      : 'Nothing new.';
+    setStatus(result.warning ? `${summary} (${result.warning})` : summary,
+              result.warning ? 'bad' : 'good');
   } else {
     setStatus(result.error, 'bad');
   }
+  await refresh();
+});
+
+$('backfill').addEventListener('click', async () => {
+  setStatus('Reading your recent LeetCode solves…');
+  const result = await send({ type: 'backfill-leetcode' });
+  setStatus(result.ok
+    ? `Pulled ${result.found} solve${result.found === 1 ? '' : 's'} from the visible window.`
+    : result.error, result.ok ? 'good' : 'bad');
   await refresh();
 });
 
