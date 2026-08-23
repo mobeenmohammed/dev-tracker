@@ -491,6 +491,38 @@
     });
   }
 
+  /* ---------------- the extension handshake ---------------- */
+
+  /* A content script runs in its own world and cannot call window.DevTracker
+     directly, so the browser extension offers solves by postMessage and this
+     acknowledges exactly what was stored. Only same-window, same-origin
+     messages are accepted, and the payload is additive data — never code. */
+  function wireSolveBridge() {
+    window.addEventListener('message', ev => {
+      if (ev.source !== window) return;
+      if (ev.origin !== location.origin && ev.origin !== 'null') return;
+
+      const data = ev.data;
+      if (!data || data.type !== 'dev-tracker/solves' || !Array.isArray(data.solves)) return;
+
+      const result = Store.recordSolves(data.solves);
+      refresh();
+
+      /* Naming what was stored lets the extension clear only those, so a page
+         closed mid-handover loses nothing. */
+      window.postMessage({
+        type: 'dev-tracker/solves-ack',
+        problemIds: data.solves.map(s => s && s.problemId).filter(Boolean),
+        added: result.added,
+        updated: result.updated,
+      }, location.origin === 'null' ? '*' : location.origin);
+
+      if (result.added) {
+        toast(`${result.added} new solve${result.added === 1 ? '' : 's'} from Codeforces.`);
+      }
+    });
+  }
+
   /* ---------------- boot ---------------- */
 
   async function main() {
@@ -637,6 +669,8 @@
       },
       get version() { return Store.state.version; },
     };
+
+    wireSolveBridge();
 
     applyInspectorWidth();
     wireInspectorResizer();

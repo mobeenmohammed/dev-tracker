@@ -483,6 +483,68 @@ check('progress counts the solves', Store.progressOf('cpp-algorithms') >= 0.25,
 check('the inspector cites the evidence', /problem/.test($('.progress-evidence').textContent),
       $('.progress-evidence')?.textContent);
 
+/* ---------- 7c-bis. the extension handshake ---------- */
+/* Stands in for the content script. jsdom leaves `source` null on a real
+   postMessage, where a browser sets it to the sending window, so the event is
+   constructed the way a browser delivers it — the page's guard stays strict. */
+const postToPage = data => window.dispatchEvent(new window.MessageEvent('message', {
+  data, source: window, origin: window.location.origin,
+}));
+
+const offerSolves = solves => new Promise(resolve => {
+  const onMessage = ev => {
+    if (!ev.data || ev.data.type !== 'dev-tracker/solves-ack') return;
+    window.removeEventListener('message', onMessage);
+    resolve(ev.data);
+  };
+  window.addEventListener('message', onMessage);
+  postToPage({ type: 'dev-tracker/solves', solves });
+  setTimeout(() => { window.removeEventListener('message', onMessage); resolve(null); }, 500);
+});
+
+const beforeBridge = Store.problemsMatching().length;
+const ack = await offerSolves([
+  { source: 'codeforces', problemId: '1700C', title: 'Helping the Nature',
+    tags: ['greedy'], difficulty: 1500, solvedAt: Store.todayISO() },
+]);
+check('the page acknowledges the handover', !!ack, 'no acknowledgement arrived');
+check('it names what it stored', ack && ack.problemIds, ['1700C']);
+check('it reports one added', ack && ack.added === 1, JSON.stringify(ack));
+check('the solve is stored', Store.problemsMatching().length === beforeBridge + 1);
+
+// Offering the same solve again must not duplicate it, but must still ack, or
+// the extension would never clear its queue.
+const second = await offerSolves([
+  { source: 'codeforces', problemId: '1700C', title: 'Helping the Nature',
+    tags: ['greedy'], difficulty: 1500, solvedAt: Store.todayISO() },
+]);
+check('a repeat handover is acknowledged too', !!second && second.problemIds.length === 1);
+check('and adds nothing', second.added === 0, JSON.stringify(second));
+check('no duplicate stored', Store.problemsMatching().length === beforeBridge + 1);
+
+// Messages that are not a solve offer are ignored.
+await offerSolves([]);
+check('an empty offer is harmless', Store.problemsMatching().length === beforeBridge + 1);
+postToPage({ type: 'something-else', solves: [{ source: 'x', problemId: 'y', title: 'z' }] });
+await tick();
+check('unrelated messages are ignored', Store.problemsMatching().length === beforeBridge + 1);
+
+// The guard must actually reject what it claims to reject.
+const spoof = { type: 'dev-tracker/solves', solves: [{ source: 'codeforces', problemId: 'SPOOF', title: 'Injected' }] };
+window.dispatchEvent(new window.MessageEvent('message', {
+  data: spoof, source: null, origin: window.location.origin,
+}));
+await tick();
+check('a message from another window is refused',
+      !Store.problemsMatching().some(p => p.problemId === 'SPOOF'), 'a foreign window got through');
+
+window.dispatchEvent(new window.MessageEvent('message', {
+  data: spoof, source: window, origin: 'https://somewhere-else.example',
+}));
+await tick();
+check('a message from another origin is refused',
+      !Store.problemsMatching().some(p => p.problemId === 'SPOOF'), 'a foreign origin got through');
+
 /* ---------- 7d. applications, and their privacy ---------- */
 click($$('.tab-fixed').find(t => t.dataset.view === 'apps'));
 check('applications view shown', !$('#view-apps').hidden);

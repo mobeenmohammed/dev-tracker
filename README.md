@@ -125,6 +125,46 @@ The page also exposes `window.DevTracker.recordSolves([…])`, which is the
 surface a browser extension will write through; repeat solves are matched on
 `source` + `problemId` and never duplicated.
 
+### Syncing solves from Codeforces
+
+`extension/` holds a Chrome extension (Manifest V3) that records your accepted
+Codeforces submissions, with their tags and ratings, into the tracker.
+
+Codeforces is the only platform synced automatically, on purpose. It has a real
+public API — `user.status`, no account and no key — so nothing is scraped and
+nothing breaks when the site is redesigned. LeetCode and CSES would need DOM
+observation, which rots silently every time they ship a redesign.
+
+**Installing it**
+
+1. Open `chrome://extensions`, turn on **Developer mode**.
+2. **Load unpacked**, and pick the `extension/` folder.
+3. Open its **Options**, enter your Codeforces handle, and press **Sync now**.
+
+**How a solve reaches the tracker**
+
+```
+service worker polls user.status
+   -> accepted submissions become solves, queued in extension storage
+   -> you open the tracker
+   -> content script offers the queue by postMessage
+   -> the page stores them and acknowledges exactly what it kept
+   -> only those are dropped from the queue
+```
+
+The tracker has no backend, so nothing can be pushed to it; the handover
+happens whenever you next open the page. Because the page acknowledges what it
+stored, a tab closed mid-handover loses nothing, and the same solve arriving
+twice is matched on `source` + `problemId` rather than duplicated.
+
+Only the first accepted submission per problem counts, so re-solving something
+does not inflate the numbers, and dates use your local calendar day rather than
+UTC — an evening solve is not filed under tomorrow.
+
+The extension ships allowing `mobeenmohammed.github.io/dev-tracker/` and
+`localhost`; change `host_permissions` and `content_scripts.matches` in
+`extension/manifest.json` if the tracker lives elsewhere.
+
 ### Public and private data
 
 The repository is public, so Pages can serve it. Anything that should not be
@@ -222,6 +262,7 @@ drive the page in tests.
 | `tests/browser/app.test.mjs` | The whole UI driven through real events: tabs, cards, the inspector, checklists, privacy, the list, and the focus checklist. |
 | `tests/browser/boot.test.mjs` | Starting up from saved state, including a field deleted since the last visit. |
 | `tests/browser/styles.test.mjs` | That nothing marked `hidden` is still displayed — a real bug once left an invisible overlay covering the canvas. |
+| `tests/extension.test.mjs` | Mapping Codeforces submissions to solves: verdict filtering, one entry per problem, incremental syncing, and the fields the API omits. |
 
 
 
@@ -249,6 +290,7 @@ js/problems.js        the Problems view and solve import
 js/applications.js    the Applications view (private data)
 js/app.js             bootstrap, view switching, import/export, shortcuts
 data/learning.json    the committed snapshot
-tests/                data model and browser tests
+extension/            Chrome extension that syncs Codeforces solves
+tests/                data model, extension and browser tests
 .github/workflows/    test-and-deploy pipeline
 ```

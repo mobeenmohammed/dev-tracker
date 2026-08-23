@@ -2,11 +2,12 @@
   "name": "dev-tracker",
   "version": "1.0.0",
   "private": true,
-  "description": "A personal tracker for learning, drawn as a tree of cards. The site itself has no runtime dependencies; jsdom is only used to test it.",
+  "description": "A personal tracker for learning, solved problems and job applications. The site itself has no runtime dependencies; jsdom is only used to test it.",
   "type": "module",
   "scripts": {
-    "test": "npm run test:store && npm run test:browser",
+    "test": "npm run test:store && npm run test:extension && npm run test:browser",
     "test:store": "node tests/store.test.mjs",
+    "test:extension": "node tests/extension.test.mjs",
     "test:browser": "node tests/browser/app.test.mjs && node tests/browser/boot.test.mjs && node tests/browser/styles.test.mjs",
     "serve": "python -m http.server 8000"
   },

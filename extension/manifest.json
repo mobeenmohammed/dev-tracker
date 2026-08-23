@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Dev Tracker — Codeforces sync",
+  "version": "1.0.0",
+  "description": "Records your accepted Codeforces submissions, with their tags and ratings, into your Dev Tracker.",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": [
+    "https://codeforces.com/*",
+    "https://mobeenmohammed.github.io/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://mobeenmohammed.github.io/dev-tracker/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": ["bridge.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Dev Tracker — Codeforces sync"
+  }
+}

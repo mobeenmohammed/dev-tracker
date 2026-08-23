@@ -45,6 +45,9 @@ jobs:
           fi
           echo "no private data committed"
 
+      - name: Check the extension manifest is valid
+        run: node -e "const m=require('./extension/manifest.json'); if(m.manifest_version!==3) throw new Error('not MV3'); console.log('manifest ok:', m.name, m.version)"
+
       - run: npm test
 
   deploy:
