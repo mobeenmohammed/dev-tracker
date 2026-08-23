@@ -70,6 +70,17 @@ function listenForDigest() {
 
 listenForDigest();
 
+/* The page may have offered its digest before this script existed, so ask for
+   it rather than waiting for something that has already happened. */
+function requestDigest() {
+  window.postMessage({ type: 'dev-tracker/digest-request' }, window.location.origin);
+}
+
 /* The page defines its bridge as it boots, so wait for the load to settle. */
-if (document.readyState === 'complete') handover();
-else window.addEventListener('load', () => setTimeout(handover, 300));
+function start() {
+  requestDigest();
+  handover();
+}
+
+if (document.readyState === 'complete') setTimeout(start, 300);
+else window.addEventListener('load', () => setTimeout(start, 300));

@@ -330,9 +330,12 @@ check('the mistake is kept', Store.problemsMatching()[0].mistake, 'off-by-one');
 /* Booking a revisit puts it in the queue and flags the state. */
 Store.scheduleReview(solved.id, 7);
 check('a review moves it to needs-review', Store.problemsMatching()[0].state, 'review');
-check('and it is listed',                  Store.problemsToRevisit().length, 1);
 check('the date is set',                   Store.problemsMatching()[0].reviewOn,
                                            Store.shiftDays(Store.todayISO(), 7));
+/* Booked for next week is due next week, not today. */
+check('it waits for its date',             Store.problemsToRevisit().length, 0);
+Store.updateProblem(solved.id, { reviewOn: Store.shiftDays(Store.todayISO(), -1) });
+check('and is listed once it arrives',     Store.problemsToRevisit().length, 1);
 
 Store.markRevisited(solved.id, { independent: true });
 check('re-solving clears the queue',   Store.problemsToRevisit().length, 0);
@@ -788,7 +791,7 @@ Store.recordSolve({ source: 'leetcode', problemId: 'two-sum', title: 'Two Sum', 
 check('a revisit can be booked from a page', Store.problemsMatching()[0].reviewOn,
       Store.shiftDays(Store.todayISO(), 7));
 check('and it enters the queue',     Store.problemsMatching()[0].state, 'review');
-check('showing up as due',           Store.problemsToRevisit().length, 1);
+check('but waits for its date',      Store.problemsToRevisit().length, 0);
 
 /* And say it was solved again. */
 Store.recordSolve({ source: 'leetcode', problemId: 'two-sum', title: 'Two Sum', revisit: true });
@@ -807,6 +810,94 @@ Store.recordSolve({ source: 'codeforces', problemId: '1234A', title: 'New One',
                     independence: 'solution', reviewInDays: 3 });
 const fresh = Store.problemsMatching({ source: 'codeforces' })[0];
 check('a new solve takes its actions too', [fresh.state, fresh.independence], ['review', 'solution']);
+
+/* --- regressions from the review: a booked revisit is due on its date --- */
+Store.importJSON(JSON.stringify({ nodes: [{ id: 'n', parentId: null, name: 'N' }] }));
+const rv = Store.recordSolve({ source: 'other', problemId: 'rv', title: 'RV' }).problem;
+
+Store.scheduleReview(rv.id, 30);
+check('booking flags it',            Store.problemsMatching()[0].state, 'review');
+check('but it is not due today',     Store.problemsToRevisit().length, 0);
+
+Store.scheduleReview(rv.id, 0);
+check('un-booking clears the date',  Store.problemsMatching()[0].reviewOn, '');
+check('and the flag with it',        Store.problemsMatching()[0].state, 'solved');
+check('so it leaves the queue',      Store.problemsToRevisit().length, 0);
+
+/* Flagged with no date means it is wanted now. */
+Store.updateProblem(rv.id, { state: 'review' });
+check('flagged without a date is due', Store.problemsToRevisit().length, 1);
+Store.updateProblem(rv.id, { state: 'review', reviewOn: Store.shiftDays(Store.todayISO(), -1) });
+check('and an overdue date is due too', Store.problemsToRevisit().length, 1);
+
+/* --- deleting a topic takes everything that named it --- */
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'field', parentId: null, name: 'Field', private: true },
+    { id: 'kid',   parentId: 'field', name: 'Kid' },
+    { id: 'other', parentId: null, name: 'Other' },
+  ],
+  tagMap: { dp: 'kid' },
+}));
+Store.addEntry('kid', 'a private thought');
+Store.addLink('other', 'kid', '', 'requires');
+Store.recordSolve({ source: 'other', problemId: 'q', title: 'Q', nodeId: 'kid' });
+const proj = Store.addProject({ name: 'Thing' });
+Store.linkConcept(proj.id, 'kid', 'used here');
+const gl = Store.addGoal({ name: 'Goal' });
+Store.addGoalPart(gl.id, { kind: 'status', nodeId: 'kid', status: 'proficient', text: 'Kid proficient' });
+
+Store.deleteNode('kid');
+check('its notes go with it',         Store.state.journal.length, 0);
+check('references to it go too',      Store.state.links.length, 0);
+check('tag mappings are cleared',     Store.nodeForTags(['dp']), null);
+check('project concepts are dropped', Store.projects()[0].concepts.length, 0);
+check('a goal part becomes manual',   Store.goals()[0].parts[0].kind, 'manual');
+check('the solve survives, unlinked', [Store.problemsMatching().length, Store.problemsMatching()[0].nodeId], [1, null]);
+
+/* The reason it matters: an orphaned note used to be published. */
+check('nothing of it reaches the public snapshot',
+      /private thought/.test(Store.toJSON()), false);
+
+/* An entry with no topic at all is never treated as publishable. */
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'a', parentId: null, name: 'A' }],
+  journal: [{ id: 'j', nodeId: 'ghost', at: '2026-01-01T00:00:00.000Z', text: 'orphan' }],
+}));
+check('an orphaned entry is dropped on load', Store.state.journal.length, 0);
+
+/* --- a public project must not name a private topic --- */
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'pub',  parentId: null, name: 'Public' },
+    { id: 'hush', parentId: null, name: 'Hush', private: true },
+  ],
+}));
+const mixed = Store.addProject({ name: 'Mixed' });
+Store.linkConcept(mixed.id, 'pub', 'openly');
+Store.linkConcept(mixed.id, 'hush', 'quietly');
+const published = JSON.parse(Store.toJSON()).projects[0];
+check('the public project is published',   published.name, 'Mixed');
+check('but not its private concept',       published.concepts.map(c => c.nodeId), ['pub']);
+check('the private half keeps everything',
+      JSON.parse(Store.toPrivateJSON()).projects.length, 0);
+
+/* --- a goal part measured by a number needs one --- */
+const g2 = Store.addGoal({ name: 'Counting' });
+check('problems with no amount refused',  Store.addGoalPart(g2.id, { kind: 'problems', nodeId: 'pub' }), null);
+check('hours with no amount refused',     Store.addGoalPart(g2.id, { kind: 'sessions', nodeId: 'pub' }), null);
+check('an automatic part needs a topic',  Store.addGoalPart(g2.id, { kind: 'status', text: 'x' }), null);
+check('with an amount it is accepted',
+      !!Store.addGoalPart(g2.id, { kind: 'problems', nodeId: 'pub', amount: 5 }), true);
+check('a manual part needs neither',      !!Store.addGoalPart(g2.id, { kind: 'manual', text: 'do it' }), true);
+
+/* --- a reference reads correctly from both ends --- */
+check('every type has both readings',
+      Store.LINK_TYPES.every(t => t.phrase && t.inverse), true);
+check('requires reads back as required by',
+      Store.LINK_TYPES.find(t => t.id === 'requires').inverse, 'is required by');
+check('relates does not become "is relates to"',
+      Store.LINK_TYPES.find(t => t.id === 'relates').inverse, 'relates to');
 
 /* --- a broken parent link re-roots instead of vanishing --- */
 Store.importJSON(JSON.stringify({

@@ -525,7 +525,19 @@
                            location.origin === 'null' ? '*' : location.origin);
       } catch { /* nothing is listening, which is the normal case */ }
     };
+
+    /* The extension's listener is injected when the document settles, which
+       may be after this runs. Rather than rely on the timing, it can ask —
+       and the offer is repeated briefly in case it was not listening yet. */
+    window.addEventListener('message', ev => {
+      if (ev.source !== window) return;
+      if (ev.origin !== location.origin && ev.origin !== 'null') return;
+      if (!ev.data || ev.data.type !== 'dev-tracker/digest-request') return;
+      send();
+    });
+
     send();
+    setTimeout(send, 1200);
 
     let pending = null;
     Store.onChange(() => {

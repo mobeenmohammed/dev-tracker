@@ -239,6 +239,23 @@ const Problems = (() => {
     return row;
   }
 
+  /* Reopening a problem should show the revisit that is actually booked, not
+     "not scheduled" beside a note saying otherwise. */
+  function reviewOptions(problem) {
+    const choices = [['', 'not scheduled'], ['3', '3 days'], ['7', '7 days'],
+                     ['14', '2 weeks'], ['30', 'a month']];
+    const booked = problem.reviewOn
+      ? String(Store.daysBetween(Store.todayISO(), problem.reviewOn)) : '';
+
+    /* A date that does not line up with an offer keeps its own entry rather
+       than being silently rounded to one that does. */
+    if (booked && !choices.some(([value]) => value === booked)) {
+      choices.push([booked, `on ${problem.reviewOn}`]);
+    }
+    return choices.map(([value, label]) =>
+      `<option value="${value}" ${value === booked ? 'selected' : ''}>${esc(label)}</option>`).join('');
+  }
+
   function problemDetail(p) {
     const panel = document.createElement('div');
     panel.className = 'problem-detail';
@@ -307,11 +324,7 @@ const Problems = (() => {
             </select></label>
           <label class="field"><span>Revisit in</span>
             <select id="pd-review">
-              <option value="">not scheduled</option>
-              <option value="3">3 days</option>
-              <option value="7">7 days</option>
-              <option value="14">2 weeks</option>
-              <option value="30">a month</option>
+              ${reviewOptions(p)}
             </select></label>
         </div>
 

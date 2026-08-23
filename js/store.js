@@ -427,11 +427,33 @@ const Store = (() => {
     return node;
   }
 
-  /* Removes the node, everything under it, and their logged sessions. */
+  /* Removes the node, everything under it, and everything that pointed at it.
+
+     Leaving references behind is not merely untidy: a journal entry whose
+     topic is gone can no longer be seen as private, so it would be written
+     into the public snapshot. Anything naming a deleted topic goes with it. */
   function deleteNode(id) {
     const doomed = new Set([id, ...descendantsOf(id).map(n => n.id)]);
+
     state.nodes    = state.nodes.filter(n => !doomed.has(n.id));
     state.sessions = state.sessions.filter(s => !doomed.has(s.nodeId));
+    state.journal  = state.journal.filter(e => !doomed.has(e.nodeId));
+    state.links    = state.links.filter(l => !doomed.has(l.from) && !doomed.has(l.to));
+
+    /* These outlive the topic, so they lose the link rather than the record. */
+    state.problems.forEach(p => { if (doomed.has(p.nodeId)) p.nodeId = null; });
+    state.focus.forEach(t => { if (doomed.has(t.nodeId)) t.nodeId = null; });
+    state.projects.forEach(pr => {
+      pr.concepts = pr.concepts.filter(c => !doomed.has(c.nodeId));
+    });
+    state.goals.forEach(g => {
+      g.parts = g.parts.map(part => (doomed.has(part.nodeId)
+        ? { ...part, kind: 'manual', nodeId: null } : part));
+    });
+    Object.keys(state.tagMap).forEach(tag => {
+      if (doomed.has(state.tagMap[tag])) delete state.tagMap[tag];
+    });
+
     persist();
     return doomed.size;
   }
@@ -626,12 +648,14 @@ const Store = (() => {
   /* An edge that says how two topics relate carries far more than one that
      only says they do. "Concurrency requires Processes" is checkable; "these
      are related" is not. */
+  /* `phrase` reads from the topic the reference was added to; `inverse` reads
+     from the other end, which is not always the same sentence turned around. */
   const LINK_TYPES = [
-    { id: 'relates',  label: 'relates to',  arrow: 'to',   phrase: 'relates to'  },
-    { id: 'requires', label: 'requires',    arrow: 'to',   phrase: 'requires'    },
-    { id: 'part-of',  label: 'is part of',  arrow: 'to',   phrase: 'is part of'  },
-    { id: 'extends',  label: 'extends',     arrow: 'to',   phrase: 'extends'     },
-    { id: 'used-by',  label: 'is used by',  arrow: 'to',   phrase: 'is used by'  },
+    { id: 'relates',  label: 'relates to', phrase: 'relates to', inverse: 'relates to'  },
+    { id: 'requires', label: 'requires',   phrase: 'requires',   inverse: 'is required by' },
+    { id: 'part-of',  label: 'is part of', phrase: 'is part of', inverse: 'contains'    },
+    { id: 'extends',  label: 'extends',    phrase: 'extends',    inverse: 'is extended by' },
+    { id: 'used-by',  label: 'is used by', phrase: 'is used by', inverse: 'uses'        },
   ];
   const LINK_TYPE_IDS = LINK_TYPES.map(t => t.id);
 
@@ -1060,8 +1084,10 @@ const Store = (() => {
     return state.problems
       .filter(p => {
         if (p.state === 'mastered') return false;
-        if (p.state === 'review') return true;
-        return p.reviewOn && p.reviewOn <= today;
+        /* A booked revisit is due on its date, not the moment it is booked;
+           without a date, needing review means needing it now. */
+        if (p.reviewOn) return p.reviewOn <= today;
+        return p.state === 'review';
       })
       .sort((a, b) => (a.reviewOn || a.solvedAt).localeCompare(b.reviewOn || b.solvedAt));
   }
@@ -1070,8 +1096,16 @@ const Store = (() => {
   function scheduleReview(id, days) {
     const problem = state.problems.find(p => p.id === id);
     if (!problem) return null;
-    problem.reviewOn = days > 0 ? shiftDays(todayISO(), Number(days)) : '';
-    if (days > 0 && problem.state === 'solved') problem.state = 'review';
+
+    if (Number(days) > 0) {
+      problem.reviewOn = shiftDays(todayISO(), Number(days));
+      if (problem.state === 'solved') problem.state = 'review';
+    } else {
+      /* Un-booking has to undo the flag as well, or the problem would sit in
+         the revisit list with no way back out. */
+      problem.reviewOn = '';
+      if (problem.state === 'review') problem.state = 'solved';
+    }
     persist();
     return problem;
   }
@@ -1288,11 +1322,17 @@ const Store = (() => {
     persist();
   }
 
+  const COUNTED_PARTS = ['problems', 'sessions'];
+
   function addGoalPart(goalId, part) {
     const goal = state.goals.find(g => g.id === goalId);
     if (!goal) return null;
     const built = normalizeGoalPart({ ...part, id: uid('gp') });
     if (!built.text && !built.nodeId) return null;
+    /* "Solve N problems" with no N can never complete, and would cap the
+       goal's average forever. */
+    if (COUNTED_PARTS.includes(built.kind) && built.amount < 1) return null;
+    if (built.kind !== 'manual' && !built.nodeId) return null;
     goal.parts.push(built);
     persist();
     return built;
@@ -1704,12 +1744,19 @@ const Store = (() => {
           return (mapped ? priv.has(mapped) : false) === wantPrivate;
         })
         .sort((a, b) => a.solvedAt.localeCompare(b.solvedAt)),
-      /* A project follows its own private flag, like a branch does. */
-      projects: state.projects.filter(p => !!p.private === wantPrivate),
+      /* A project follows its own private flag, like a branch does — but a
+         public one must not name a private topic in its concepts. */
+      projects: state.projects
+        .filter(p => !!p.private === wantPrivate)
+        .map(p => (wantPrivate ? p
+          : { ...p, concepts: p.concepts.filter(c => !priv.has(c.nodeId)) })),
       /* Goals are public: they are about learning, not about anyone. */
       goals: wantPrivate ? [] : state.goals,
       /* A journal entry follows the topic it was written against. */
-      journal: state.journal.filter(e => priv.has(e.nodeId) === wantPrivate),
+      /* An entry can only be judged public or private through its topic, so
+         one whose topic is missing is never treated as publishable. */
+      journal: state.journal.filter(e =>
+        byId(e.nodeId) && priv.has(e.nodeId) === wantPrivate),
       /* A reference is only public when both ends are. */
       links: state.links.filter(l =>
         (priv.has(l.from) || priv.has(l.to)) === wantPrivate),

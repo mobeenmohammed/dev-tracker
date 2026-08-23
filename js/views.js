@@ -279,7 +279,7 @@ const Views = (() => {
       const type = Store.LINK_TYPES.find(t => t.id === link.type) || Store.LINK_TYPES[0];
       /* Read from this topic's side: outgoing says what it does, incoming says
          what is done to it. */
-      const phrase = direction === 'out' ? type.phrase : `is ${type.id === 'requires' ? 'required by' : type.phrase.replace(/^is /, '')}`;
+      const phrase = direction === 'out' ? type.phrase : type.inverse;
 
       el.innerHTML = `
         <span class="ref-dir" title="${direction === 'out' ? 'points at' : 'points here'}">${direction === 'out' ? '&rarr;' : '&larr;'}</span>

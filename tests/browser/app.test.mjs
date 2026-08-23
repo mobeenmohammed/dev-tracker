@@ -647,6 +647,14 @@ Store.updateProblem(known.id, { mistake: 'forgot the base case' });
 const shared = await digestPromise;
 
 check('the tracker offers a digest', !!shared, 'nothing was broadcast');
+
+/* And it can be asked for, so a listener that started late is not stranded. */
+const askedFor = await (async () => {
+  const wait = nextDigest();
+  postToPage({ type: 'dev-tracker/digest-request' });
+  return wait;
+})();
+check('a digest can be requested', !!askedFor, 'no answer to a request');
 check('covering every solve', shared && shared.problems.length === Store.problemsMatching().length,
       shared && `${shared.problems.length} vs ${Store.problemsMatching().length}`);
 check('carrying what went wrong',
@@ -791,12 +799,26 @@ check('attempts are saved', Store.problemsMatching()[0].attempts === 3);
 
 $('#pd-review').value = '7';
 fire($('#pd-review'), 'change');
-check('a revisit can be booked', Store.problemsMatching()[0].state === 'review');
-check('the revisit block appears', !$('#revisitBlock').hidden);
+const booked = Store.problemsMatching()[0];
+check('a revisit can be booked', booked.state === 'review');
+check('the date is a week out', booked.reviewOn === Store.shiftDays(Store.todayISO(), 7));
+/* Booked for next week means due next week, not the moment it was booked. */
+check('it is not due yet', $('#revisitBlock').hidden, 'a future revisit surfaced immediately');
+check('the row shows its state', /Needs review/.test($('#problemList .p-state').textContent));
+
+/* Un-booking has to undo the flag too, or it could never leave the queue. */
+$('#pd-review').value = '';
+fire($('#pd-review'), 'change');
+check('un-booking clears the flag', Store.problemsMatching()[0].state === 'solved');
+check('and the date', Store.problemsMatching()[0].reviewOn === '');
+
+/* Once the date arrives it surfaces, saying why it is there. */
+Store.updateProblem(booked.id, { state: 'review', reviewOn: Store.shiftDays(Store.todayISO(), -1) });
+window.Problems.render();
+check('an overdue revisit appears', !$('#revisitBlock').hidden);
 check('and lists it', $$('#revisitList .revisit-row').length === 1);
 check('saying why it is there', /hint|off-by-one/.test($('#revisitList .rv-why').textContent),
       $('#revisitList .rv-why').textContent);
-check('the row shows its state', /Needs review/.test($('#problemList .p-state').textContent));
 
 click($('#revisitList [data-act="done"]'));
 check('re-solving clears it', $('#revisitBlock').hidden);
@@ -968,12 +990,14 @@ click($('#closeDay'));
 check('and it closes again', $('#dayDetail').hidden);
 
 /* A day with nothing on it says so rather than showing an empty box. */
-const emptyCell = $$('#heatmap .hm-cell').find(c => c.dataset.date === Store.shiftDays(Store.todayISO(), -200));
-if (emptyCell) {
-  click(emptyCell);
-  check('a quiet day says so', /Nothing recorded/.test($('#dayDetail').textContent));
-  click($('#closeDay'));
-}
+/* The grid spans about 188 days, so -200 fell outside it and this quietly
+   never ran. */
+const emptyCell = $$('#heatmap .hm-cell').find(c => c.dataset.date === Store.shiftDays(Store.todayISO(), -150));
+check('a day well in the past is on the grid', !!emptyCell, 'no cell at -150 days');
+click(emptyCell);
+check('a quiet day says so', /Nothing recorded/.test($('#dayDetail').textContent),
+      $('#dayDetail').textContent.slice(0, 80));
+click($('#closeDay'));
 
 /* GitHub's word for this is contributions; ours is activity, so the two can
    never be confused with commits. */

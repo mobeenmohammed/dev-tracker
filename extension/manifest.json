@@ -10,7 +10,9 @@
   ],
   "host_permissions": [
     "https://codeforces.com/*",
+    "https://*.codeforces.com/*",
     "https://leetcode.com/*",
+    "https://*.leetcode.com/*",
     "https://projecteuler.net/*",
     "https://mobeenmohammed.github.io/*",
     "http://localhost/*",
@@ -45,7 +47,9 @@
     {
       "matches": [
         "https://leetcode.com/problems/*",
-        "https://codeforces.com/*"
+        "https://*.leetcode.com/problems/*",
+        "https://codeforces.com/*",
+        "https://*.codeforces.com/*"
       ],
       "js": [
         "pagekey.js",

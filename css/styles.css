@@ -1080,7 +1080,8 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 
 .problem-row {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) 54px 70px 130px 78px;
+  /* title, tags, rating, felt, state, topic, date */
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.3fr) 54px 62px 88px 120px 78px;
   gap: 10px;
   align-items: center;
   padding: 7px 8px;
@@ -1255,8 +1256,9 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .tl-add input[name="note"] { flex: 2 1 180px; }
 
 @media (max-width: 900px) {
-  .problem-row { grid-template-columns: minmax(0, 2fr) 70px 78px; }
-  .problem-row .p-tags, .problem-row .p-rating, .problem-row .p-node { display: none; }
+  .problem-row { grid-template-columns: minmax(0, 2fr) 88px 78px; }
+  .problem-row .p-tags, .problem-row .p-rating,
+  .problem-row .p-felt, .problem-row .p-node { display: none; }
   .app-row { grid-template-columns: minmax(0, 1fr) 120px; }
   .app-row .app-role, .app-row .app-loc, .app-row .app-date { display: none; }
   .tag-row { grid-template-columns: 110px 1fr 34px; }
