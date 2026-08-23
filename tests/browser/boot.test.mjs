@@ -25,6 +25,7 @@ async function boot(uiState, { deletedField = null } = {}) {
     ? { ok: true, json: async () => JSON.parse(seed) }
     : { ok: false, status: 404 });
   window.matchMedia = () => ({ matches: false, addEventListener() {} });
+  window.prompt = () => null;
   window.alert = msg => errors.push('alert(): ' + msg);
 
   const state = JSON.parse(seed);
@@ -32,7 +33,7 @@ async function boot(uiState, { deletedField = null } = {}) {
   window.localStorage.setItem('learning-tree/state/v1', JSON.stringify({ ...state, updatedAt: new Date().toISOString() }));
   window.localStorage.setItem('learning-tree/ui/v1', JSON.stringify(uiState));
 
-  const bundle = ['js/store.js', 'js/tree.js', 'js/views.js', 'js/app.js']
+  const bundle = ['js/store.js', 'js/tree.js', 'js/views.js', 'js/problems.js', 'js/applications.js', 'js/app.js']
     .map(f => fs.readFileSync(path.join(ROOT, f), 'utf8'))
     .join(String.fromCharCode(10) + ';' + String.fromCharCode(10));
   window.eval(bundle + ';window.Store = Store; window.Tree = Tree;');

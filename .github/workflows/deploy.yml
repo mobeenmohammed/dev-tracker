@@ -32,11 +32,15 @@ jobs:
       - name: Fail if private data was committed by mistake
         run: |
           if [ -f data/private.json ]; then
-            echo "data/private.json is committed — it must stay local and git-ignored."
+            echo "data/private.json is committed - it must stay local and git-ignored."
             exit 1
           fi
           if grep -rl '"private": *true' data/ 2>/dev/null | grep -q .; then
             echo "A node marked private is present in committed data."
+            exit 1
+          fi
+          if grep -rl '"applications"' data/ 2>/dev/null | grep -q .; then
+            echo "Job applications are present in committed data - they must never be published."
             exit 1
           fi
           echo "no private data committed"

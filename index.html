@@ -37,6 +37,7 @@
         <button data-action="export-private">Export private data…</button>
         <button data-action="copy">Copy JSON to clipboard</button>
         <button data-action="import">Import JSON…</button>
+        <button data-action="import-solves">Import solved problems…</button>
         <hr>
         <button data-action="reload">Reload from repo file</button>
         <button data-action="reset" class="danger">Reset to seed data</button>
@@ -50,6 +51,8 @@
   <div class="tabs-fields" id="fieldTabs"><!-- built from the fields in the data --></div>
   <div class="tabs-fixed">
     <button class="tab tab-fixed" data-view="focus" role="tab">Focus</button>
+    <button class="tab tab-fixed" data-view="problems" role="tab">Problems</button>
+    <button class="tab tab-fixed" data-view="apps" role="tab">Applications</button>
     <button class="tab tab-fixed" data-view="list"  role="tab">List</button>
     <button class="tab tab-fixed" data-view="stats" role="tab">Stats</button>
   </div>
@@ -150,6 +153,72 @@
     </div>
   </section>
 
+  <!-- ============ PROBLEMS VIEW ============ -->
+  <section class="panel view" id="view-problems" hidden>
+    <div class="stats-grid" id="problemStats"></div>
+
+    <div class="stats-block">
+      <h2>Platform</h2>
+      <div id="problemSources" class="chip-row"></div>
+    </div>
+
+    <div class="stats-block">
+      <h2>What you have been practising</h2>
+      <p class="muted">Counts by tag. Click one to filter the list below.</p>
+      <div id="problemTags" class="tag-list"></div>
+    </div>
+
+    <div class="stats-block">
+      <h2>Solved <span id="problemCount" class="muted"></span></h2>
+      <div id="problemList" class="problem-list"></div>
+
+      <form id="problemForm" class="problem-form">
+        <select name="source" aria-label="Platform"></select>
+        <input type="text" name="problemId" placeholder="ID (1234A)" aria-label="Problem ID">
+        <input type="text" name="title" placeholder="Problem title" aria-label="Title" required>
+        <input type="text" name="tags" placeholder="tags, comma separated" aria-label="Tags">
+        <input type="number" name="difficulty" placeholder="Rating" aria-label="Rating" min="0" step="100">
+        <input type="number" name="minutes" placeholder="Mins" aria-label="Minutes" min="0" step="5">
+        <input type="date" name="solvedAt" aria-label="Solved on">
+        <input type="url" name="url" placeholder="Link (optional)" aria-label="Link">
+        <button class="btn btn-primary" type="submit">Add solve</button>
+      </form>
+    </div>
+
+    <details class="stats-block mapping-block">
+      <summary><h2>Tag to topic mapping</h2></summary>
+      <p class="muted">Solves only count towards a topic once its tags point at one.
+        Automatic guesses are never quite right, so this is yours to set.</p>
+      <div id="tagMapping" class="map-list"></div>
+    </details>
+  </section>
+
+  <!-- ============ APPLICATIONS VIEW ============ -->
+  <section class="panel view" id="view-apps" hidden>
+    <p class="private-note">
+      <strong>Private.</strong> Applications are never written to the public snapshot
+      and never reach the published site — they live only in <code>data/private.json</code>,
+      which is git-ignored.
+    </p>
+
+    <div class="stats-grid" id="appStats"></div>
+    <div id="appDue" class="due-block" hidden></div>
+
+    <div class="stats-block">
+      <h2>Pipeline</h2>
+      <div id="appBoard" class="app-board"></div>
+
+      <form id="appForm" class="app-form">
+        <input type="text" name="company" placeholder="Company" aria-label="Company" required>
+        <input type="text" name="role" placeholder="Role" aria-label="Role">
+        <input type="text" name="location" placeholder="Location" aria-label="Location">
+        <select name="stage" aria-label="Stage"></select>
+        <input type="date" name="appliedAt" aria-label="Applied on">
+        <button class="btn btn-primary" type="submit">Add application</button>
+      </form>
+    </div>
+  </section>
+
   <!-- ============ STATS VIEW ============ -->
   <section class="panel view" id="view-stats" hidden>
     <div class="stats-grid" id="statCards"></div>
@@ -168,6 +237,11 @@
     <div class="stats-block">
       <h2>Progress by field</h2>
       <div id="domainProgress" class="domain-progress"></div>
+    </div>
+
+    <div class="stats-block" id="solvesBlock" hidden>
+      <h2>Recently solved</h2>
+      <div id="recentSolves" class="session-feed"></div>
     </div>
 
     <div class="stats-block">
@@ -191,11 +265,14 @@
 </main>
 
 <input type="file" id="importFile" accept="application/json,.json" hidden>
+<input type="file" id="importSolvesFile" accept="application/json,.json" hidden>
 <div id="toast" class="toast" hidden></div>
 
 <script src="js/store.js"></script>
 <script src="js/tree.js"></script>
 <script src="js/views.js"></script>
+<script src="js/problems.js"></script>
+<script src="js/applications.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

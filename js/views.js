@@ -272,16 +272,44 @@ const Views = (() => {
     sec.appendChild(line);
 
     /* Say where the number came from, so it never looks arbitrary. */
+    const solved = Store.problemsForNode(node.id).length;
     const source = document.createElement('p');
     source.className = 'muted progress-source';
+
     if (kids.length) {
       source.textContent = `Averaged across ${kids.length} sub-topic${kids.length === 1 ? '' : 's'}.`;
-    } else if (list.total) {
-      source.textContent = `${list.done} of ${list.total} checklist item${list.total === 1 ? '' : 's'} ticked off.`;
     } else {
-      source.textContent = `From the status alone. Add checklist items and progress follows them instead.`;
+      const claims = [`status (${Store.STATUS_BY_ID[node.status].label})`];
+      if (list.total) claims.push(`checklist (${list.done}/${list.total})`);
+      if (node.problemTarget > 0) claims.push(`problems (${solved}/${node.problemTarget})`);
+      source.textContent = claims.length > 1
+        ? `The strongest of: ${claims.join(', ')}.`
+        : 'From the status alone. A checklist or a problem target will take over when it claims more.';
     }
     sec.appendChild(source);
+
+    if (!kids.length) {
+      const goal = document.createElement('label');
+      goal.className = 'field-inline problem-goal';
+      goal.innerHTML = `<span>Counts as known after</span>
+        <input type="number" id="f-target" min="0" step="1" value="${node.problemTarget || ''}" placeholder="—" style="width:70px">
+        <span>problems solved</span>`;
+      goal.querySelector('input').addEventListener('change', ev => {
+        Store.updateNode(node.id, { problemTarget: Number(ev.target.value) || 0 });
+        onChanged();
+      });
+      sec.appendChild(goal);
+    }
+
+    if (solved) {
+      const evidence = document.createElement('p');
+      evidence.className = 'progress-evidence';
+      const hardest = Store.problemsForNode(node.id)
+        .reduce((max, p) => Math.max(max, p.difficulty || 0), 0);
+      evidence.textContent = `${solved} problem${solved === 1 ? '' : 's'} solved`
+        + (hardest ? `, hardest rated ${hardest}.` : '.');
+      sec.appendChild(evidence);
+    }
     return sec;
   }
 
@@ -715,6 +743,8 @@ const Views = (() => {
       { value: formatHours(minutes),  label: 'Time logged',      sub: `${formatHours(last30)} in the last 30 days` },
       { value: Store.currentStreak(), label: 'Day streak',       sub: `${sessions.length} sessions total` },
       { value: counts.mastered + counts.proficient, label: 'Solid or better', sub: `${counts.learning + counts.practicing} in progress` },
+      { value: Store.problemStats().total, label: 'Problems solved',
+        sub: `${Store.problemStats().thisWeek} in the last 7 days` },
     ];
 
     document.getElementById('statCards').innerHTML = cards.map(c => `
@@ -726,7 +756,33 @@ const Views = (() => {
 
     renderHeatmap(sessions);
     renderDomainProgress();
+    renderRecentSolves();
     renderRecentSessions(sessions);
+  }
+
+  /* Solved problems are evidence, so they belong beside the self-reported
+     numbers rather than hidden away in their own tab. */
+  function renderRecentSolves() {
+    const box = document.getElementById('recentSolves');
+    const recent = Store.recentProblems(8);
+    const block = document.getElementById('solvesBlock');
+
+    block.hidden = Store.problemStats().total === 0;
+    if (block.hidden) return;
+
+    box.innerHTML = recent.map(p => {
+      const mapped = p.nodeId || Store.nodeForTags(p.tags);
+      const node = mapped ? Store.byId(mapped) : null;
+      return `
+        <div class="sf-row">
+          <span class="date">${esc(formatDate(p.solvedAt))}</span>
+          <span class="what">
+            ${esc(p.title)}
+            <small>${esc(Store.sourceLabel(p.source))}${node ? ' · ' + esc(node.name) : ''}${p.tags.length ? ' · ' + esc(p.tags.join(', ')) : ''}</small>
+          </span>
+          <span class="mins">${p.difficulty ? esc(p.difficulty) : ''}</span>
+        </div>`;
+    }).join('');
   }
 
   function renderHeatmap(sessions) {

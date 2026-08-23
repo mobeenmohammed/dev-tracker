@@ -144,13 +144,30 @@ check('a leaf with no checklist uses status', Store.progressOf('b'), 1);
 const i1 = Store.addItem('b', { text: 'read chapter 1' });
 Store.addItem('b', { text: 'do the exercises', url: 'https://example.com/ex' });
 check('items added',                 Store.checklistOf('b'), { total: 2, done: 0, ratio: 0 });
-check('an untouched checklist wins over status', Store.progressOf('b'), 0);
 check('blank items refused',         Store.addItem('b', { text: '  ' }), null);
 
+/* Progress takes whichever claim is strongest, so adding an empty checklist
+   never demotes something already marked mastered. */
+check('status still counts with an untouched checklist', Store.progressOf('b'), 1);
+
+Store.updateNode('b', { status: 'learning' });
+check('a weaker status yields to the checklist', Store.progressOf('b'), 0.25);
 Store.toggleItem('b', i1.id);
 check('ticking one item',            Store.checklistOf('b'), { total: 2, done: 1, ratio: 0.5 });
 check('progress follows the checklist', Store.progressOf('b'), 0.5);
 check('the parent rolls it up',      Store.progressOf('a'), 0.5);
+
+/* Finishing the checklist is a claim the topic is done, so the status follows. */
+const second = Store.byId('b').items[1];
+const toggled = Store.toggleItem('b', second.id);
+check('finishing the list promotes the status', Store.byId('b').status, 'mastered');
+check('and reports that it did',     toggled.promoted, true);
+check('progress is complete',        Store.progressOf('b'), 1);
+
+Store.toggleItem('b', second.id);
+check('un-ticking does not demote',  Store.byId('b').status, 'mastered');
+check('but progress reflects the status floor', Store.progressOf('b'), 1);
+Store.toggleItem('b', second.id);
 
 Store.updateItem('b', i1.id, { text: '  renamed  ' });
 check('item text trimmed on edit',   Store.byId('b').items[0].text, 'renamed');
@@ -167,6 +184,103 @@ check('resources migrate to items',   Store.byId('legacy').items.length, 1);
 check('the label becomes the text',   Store.byId('legacy').items[0].text, 'A book');
 check('the url is kept',              Store.byId('legacy').items[0].url, 'https://example.com');
 check('migrated items start unticked', Store.byId('legacy').items[0].done, false);
+
+/* --- solved problems --- */
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'algos', parentId: null, name: 'Algorithms' },
+    { id: 'dp',    parentId: 'algos', name: 'Dynamic Programming' },
+    { id: 'graphs',parentId: 'algos', name: 'Graphs' },
+  ],
+}));
+
+Store.recordSolve({ source: 'codeforces', problemId: '1234A', title: 'Cool Problem',
+                    tags: ['dp', 'greedy'], difficulty: 1600, solvedAt: '2026-05-01', minutes: 25 });
+Store.recordSolve({ source: 'leetcode', problemId: 'two-sum', title: 'Two Sum',
+                    tags: ['array'], solvedAt: '2026-05-02' });
+check('solves recorded',             Store.problemsMatching().length, 2);
+check('tags are normalised',         Store.problemsMatching()[0].tags, ['dp', 'greedy']);
+
+/* The same solve arriving twice is one solve, however it is spelled. */
+const again = Store.recordSolve({ source: 'codeforces', problemId: '1234a', title: 'Cool Problem',
+                                  tags: ['implementation'], solvedAt: '2026-04-28' });
+check('a repeat solve is not duplicated', Store.problemsMatching().length, 2);
+check('it is reported as an update',  again.created, false);
+check('new tags are folded in',       Store.problemsMatching()[0].tags.includes('implementation'), true);
+check('the earliest solve date wins', Store.problemsMatching()[0].solvedAt, '2026-04-28');
+
+check('filter by source',            Store.problemsMatching({ source: 'leetcode' }).length, 1);
+check('filter by tag',               Store.problemsMatching({ tag: 'dp' }).length, 1);
+
+const bulk = Store.recordSolves([
+  { source: 'codeforces', problemId: '99B', title: 'Another', tags: ['graphs'], solvedAt: '2026-05-03' },
+  { source: 'codeforces', problemId: '1234A', title: 'Cool Problem', tags: [], solvedAt: '2026-05-01' },
+]);
+check('bulk import counts new and known', bulk, { added: 1, updated: 1 });
+
+/* Tags only become evidence about a topic once they are mapped onto it. */
+check('unmapped tags point nowhere',  Store.nodeForTags(['dp']), null);
+Store.setTagMapping('dp', 'dp');
+Store.setTagMapping('graphs', 'graphs');
+check('a mapped tag resolves',        Store.nodeForTags(['dp']), 'dp');
+check('problems count towards a topic', Store.problemsForNode('dp').length, 1);
+check('a parent counts the whole branch', Store.problemsForNode('algos').length, 2);
+check('the tag index reports counts',
+      Store.tagIndex().find(t => t.tag === 'dp'), { tag: 'dp', count: 1, nodeId: 'dp' });
+Store.setTagMapping('dp', null);
+check('a mapping can be cleared',     Store.nodeForTags(['dp']), null);
+Store.setTagMapping('dp', 'dp');
+
+const pstats = Store.problemStats();
+check('stats count solves',           pstats.total, 3);
+check('stats find the hardest rating', pstats.hardest, 1600);
+check('stats count what is unmapped', pstats.unmapped, 1);
+
+/* A target turns solves into progress. */
+check('no target means no effect',    Store.progressOf('dp'), 0);
+Store.updateNode('dp', { problemTarget: 4 });
+check('one of four solved',           Store.progressOf('dp'), 0.25);
+Store.updateNode('dp', { problemTarget: 1 });
+check('a met target does not exceed 1', Store.progressOf('dp'), 1);
+
+/* A mapping to a deleted topic is dropped rather than left dangling. */
+Store.importJSON(Store.toJSON());
+Store.deleteNode('dp');
+Store.importJSON(Store.toJSON());
+check('mapping to a deleted topic dropped', Store.nodeForTags(['dp']), null);
+
+/* --- job applications are always private --- */
+Store.importJSON(JSON.stringify({ nodes: [{ id: 'pub', parentId: null, name: 'Public' }] }));
+const app = Store.addApplication({ company: 'Example Corp', role: 'SWE Intern', stage: 'applied' });
+check('application added',           Store.applications().length, 1);
+check('it starts with a timeline',   app.events.length, 1);
+check('a company name is required',  Store.addApplication({ company: '  ' }), null);
+
+Store.updateApplication(app.id, { stage: 'interview' });
+check('stage change is recorded',    Store.applications()[0].events.length, 2);
+check('the new stage is current',    Store.applications()[0].stage, 'interview');
+
+Store.addApplicationEvent(app.id, { date: '2026-06-01', stage: 'offer', note: 'verbal' });
+check('events can be added by hand', Store.applications()[0].events.length, 3);
+check('events stay in date order',
+      Store.applications()[0].events.every((e, i, a) => i === 0 || a[i - 1].date <= e.date), true);
+
+const astats = Store.applicationStats();
+check('stats count open applications', astats.open, 1);
+check('stats count interviews',       astats.interviews, 1);
+
+/* The guarantee that matters: nothing about an application in the public file. */
+check('nothing public marked private', Store.privateNodeIds().size, 0);
+check('applications never reach the public snapshot',
+      JSON.parse(Store.toJSON()).applications, undefined);
+check('the public file mentions no company',
+      /Example Corp/.test(Store.toJSON()), false);
+check('they are in the private file',
+      JSON.parse(Store.toPrivateJSON()).applications.length, 1);
+check('holding an application counts as private data', Store.hasPrivateData(), true);
+
+Store.deleteApplication(app.id);
+check('application deleted',         Store.applications().length, 0);
 
 /* --- private branches stay out of the public snapshot --- */
 Store.importJSON(JSON.stringify({

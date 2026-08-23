@@ -16,6 +16,12 @@ with **Focus**, **List** and **Stats** always pinned on the right.
   in the way.
 - **+** — names a new field inline in the tab strip and drops you into its
   empty tree, for when you start something completely new.
+- **Problems** — every problem you have solved, counted by tag so the practice
+  is visible: how many DP problems, how many graph problems, how hard they
+  felt. Filter by platform, keep notes per problem, and map tags onto topics so
+  solves become evidence in the tree.
+- **Applications** — a private pipeline for job and internship applications,
+  with a stage timeline per application and what needs chasing next.
 - **Focus** — a checklist for today: what you intend to work on, ticked off as
   you go. Every past day is kept, so it becomes a record of intentions rather
   than a list that resets. Unfinished work can be carried forward in one click.
@@ -62,15 +68,21 @@ button on the canvas toggles the dates on the cards.
 
 ### How progress is calculated
 
-- A topic with **checklist items** scores `ticked / total`, because ticking
-  things off is the most concrete signal there is.
-- A topic **without** a checklist falls back to the weight of its status.
-- A **parent** averages its children, so a field's percentage reflects
-  everything beneath it.
+A topic's progress is the **strongest claim available**, so adding new evidence
+can only ever help:
 
-One consequence worth knowing: adding a checklist to a topic marked *Mastered*
-drops it to 0% until the items are ticked. That is deliberate — the checklist
-is the more specific claim.
+| Claim | Value |
+| --- | --- |
+| Status | its weight, 0% for planned up to 100% for mastered |
+| Checklist | `ticked / total`, when there are items |
+| Problems | `solved / target`, when a target is set on the topic |
+
+A **parent** averages its children, so a field's percentage reflects everything
+beneath it.
+
+Ticking the last item on a checklist marks the topic **Mastered** — finishing
+the list is a claim that the topic is done. Un-ticking never demotes it: the
+status is yours to lower.
 
 ### Statuses
 
@@ -87,6 +99,32 @@ is the more specific claim.
 There is no backend. The app keeps its working copy in `localStorage`, and
 `data/learning.json` is the versioned snapshot committed to the repo.
 
+### Solved problems
+
+Solves are kept apart from time sessions, because a solve is a discrete event
+with an identity — `1234A`, rated 1600, tagged `dp` — and that identity is what
+makes it countable. A session is time spent; a solve is a thing done.
+
+```json
+{ "id": "p-cf1234a", "source": "codeforces", "problemId": "1234A",
+  "title": "…", "difficulty": 1600, "tags": ["dp"],
+  "perceived": 4, "solvedAt": "2026-08-23", "minutes": 25, "notes": "" }
+```
+
+Tags reach the tree through a **mapping table** you control: `dp` points at your
+Dynamic Programming topic, `graphs` at your graphs topic, and anything unmapped
+sits in a bucket you triage when you feel like it. The mapping is deliberately
+manual — automatic tag-to-topic guessing is never quite right.
+
+Set a **problem target** on a topic and solves start counting towards its
+progress, which turns "proficient at DP" from a guess into a record.
+
+Solves can be added by hand, or imported in bulk from
+**Data ▸ Import solved problems**, which accepts an array of the shape above.
+The page also exposes `window.DevTracker.recordSolves([…])`, which is the
+surface a browser extension will write through; repeat solves are matched on
+`source` + `problemId` and never duplicated.
+
 ### Public and private data
 
 The repository is public, so Pages can serve it. Anything that should not be
@@ -97,8 +135,14 @@ Exporting then produces two files:
 
 | File | Contents | Committed? |
 | --- | --- | --- |
-| `learning.json` | Everything public. | Yes — this is what the site serves. |
-| `private.json` | Private branches, their sessions and their tasks. | No — `data/private.json` is git-ignored. |
+| `learning.json` | Everything public: the tree, sessions, tasks, solves, tag mappings. | Yes — this is what the site serves. |
+| `private.json` | Private branches with their sessions, tasks and solves — **and every job application**. | No — `data/private.json` is git-ignored. |
+
+**Applications are private by construction, not by a flag you have to
+remember.** They are never written to the public snapshot under any
+circumstances, so a public repository can never carry where you applied or who
+turned you down. CI fails the build if an `applications` key ever appears in
+committed data.
 
 The app loads `data/private.json` on startup if it happens to be there, so on
 your own machine the tree is whole, while the published site only ever sees the
@@ -189,7 +233,7 @@ drive the page in tests.
 | `Enter` (in search) | Jump to the first match |
 | `n` | Add a sub-topic under the selection (or the field in focus) |
 | `N` | Start a new field |
-| `t` `d` `l` `s` | Tree / Focus / List / Stats |
+| `t` `d` `p` `a` `l` `s` | Tree / Focus / Problems / Applications / List / Stats |
 | `f` | Fit the tree to the screen |
 | `Esc` | Clear the selection |
 
@@ -199,8 +243,10 @@ drive the page in tests.
 index.html            markup and the SVG scaffold
 css/styles.css        design tokens, dark and light themes
 js/store.js           data model, persistence, derived metrics
-js/tree.js            radial layout, SVG rendering, pan and zoom
-js/views.js           inspector, list view, stats view
+js/tree.js            card layout, SVG rendering, pan and zoom
+js/views.js           inspector, focus, list and stats views
+js/problems.js        the Problems view and solve import
+js/applications.js    the Applications view (private data)
 js/app.js             bootstrap, view switching, import/export, shortcuts
 data/learning.json    the committed snapshot
 tests/                data model and browser tests

@@ -8,13 +8,13 @@
   const THEME_KEY = 'learning-tree/theme';
   const UI_KEY    = 'learning-tree/ui/v1';
 
-  let currentView = 'tree';   // 'tree' | 'focus' | 'list' | 'stats'
+  let currentView = 'tree';   // one of VIEWS
   let activeField = null;     // null = every field in one tree
   let selectedId  = null;
   let showActivity = true;    // applied to the tree once it has been initialised
   let inspectorWidth = 340;   // px, dragged by the divider and remembered
 
-  const VIEWS = ['tree', 'focus', 'list', 'stats'];
+  const VIEWS = ['tree', 'focus', 'problems', 'apps', 'list', 'stats'];
 
   const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -130,6 +130,8 @@
     if (currentView === 'list')  Views.renderList(selectedId);
     if (currentView === 'stats') Views.renderStats();
     if (currentView === 'focus') Views.renderFocus();
+    if (currentView === 'problems') { Problems.fillForm(); Problems.render(); }
+    if (currentView === 'apps') { Applications.fillForm(); Applications.render(); }
   }
 
   function showView(view) {
@@ -139,6 +141,8 @@
     if (view === 'list')  { Views.fillListFilters(); Views.renderList(selectedId); }
     if (view === 'stats') Views.renderStats();
     if (view === 'focus') Views.renderFocus();
+    if (view === 'problems') { Problems.fillForm(); Problems.render(); }
+    if (view === 'apps') { Applications.fillForm(); Applications.render(); }
     if (view === 'tree')  requestAnimationFrame(() => Tree.fit());
     persistUi();
   }
@@ -309,6 +313,10 @@
         document.getElementById('importFile').click();
         break;
 
+      case 'import-solves':
+        document.getElementById('importSolvesFile').click();
+        break;
+
       case 'reload':
         if (!confirm('Replace what is in this browser with the committed data/learning.json?')) return;
         await Store.resetToSeed();
@@ -440,6 +448,10 @@
         Tree.fit();
       } else if (ev.key === 'd') {
         openFixedView('focus');
+      } else if (ev.key === 'p') {
+        openFixedView('problems');
+      } else if (ev.key === 'a') {
+        openFixedView('apps');
       } else if (ev.key === 'l') {
         openFixedView('list');
       } else if (ev.key === 's') {
@@ -573,6 +585,58 @@
       ev.preventDefault();
       Views.submitFocusTask();
     });
+
+    Problems.init({
+      onNavigate: id => {
+        const field = Store.domainOf(id);
+        if (field && activeField) activeField = field.id;
+        Tree.setRoot(activeField);
+        showView('tree');
+        renderTabs();
+        selectNode(id, { center: true });
+      },
+      onChanged: refresh,
+    });
+
+    Applications.init({ onChanged: refresh });
+
+    document.getElementById('problemForm').addEventListener('submit', ev => {
+      ev.preventDefault();
+      Problems.submitProblem();
+    });
+
+    document.getElementById('appForm').addEventListener('submit', ev => {
+      ev.preventDefault();
+      Applications.submitApplication();
+    });
+
+    document.getElementById('importSolvesFile').addEventListener('change', ev => {
+      const file = ev.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const { added, updated } = Problems.importSolves(String(reader.result));
+          toast(`Imported ${added} new solve${added === 1 ? '' : 's'}` +
+                (updated ? `, ${updated} already known.` : '.'));
+        } catch (err) {
+          alert('Could not import those solves: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+      ev.target.value = '';
+    });
+
+    /* The surface a browser extension writes through: it can hand solves to
+       the page without knowing anything about the internals. */
+    window.DevTracker = {
+      recordSolves(list) {
+        const result = Store.recordSolves(list);
+        refresh();
+        return result;
+      },
+      get version() { return Store.state.version; },
+    };
 
     applyInspectorWidth();
     wireInspectorResizer();

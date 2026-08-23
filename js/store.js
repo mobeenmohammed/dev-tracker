@@ -91,6 +91,8 @@ const Store = (() => {
       /* `resources` was the old name, before entries could be ticked off. */
       items:     normalizeItems(n.items && n.items.length ? n.items : n.resources),
       private:   !!n.private,
+      /* Optional: how many solved problems count as knowing this topic. */
+      problemTarget: Number(n.problemTarget) > 0 ? Number(n.problemTarget) : 0,
       createdAt: n.createdAt || todayISO(),
       updatedAt: n.updatedAt || n.createdAt || todayISO(),
     };
@@ -135,6 +137,18 @@ const Store = (() => {
       .filter(t => t.text)
       .map(t => (t.nodeId && !ids.has(t.nodeId) ? { ...t, nodeId: null } : t));
 
+    const problems = (Array.isArray(raw.problems) ? raw.problems : []).map(normalizeProblem);
+    const applications = (Array.isArray(raw.applications) ? raw.applications : [])
+      .map(normalizeApplication)
+      .filter(a => a.company);
+
+    /* A tag mapping that points at a topic which no longer exists is dropped,
+       so the tag falls back to unmapped rather than pointing into nothing. */
+    const tagMap = {};
+    Object.entries(raw.tagMap || {}).forEach(([tag, nodeId]) => {
+      if (ids.has(String(nodeId))) tagMap[String(tag).toLowerCase()] = String(nodeId);
+    });
+
     return {
       version:   raw.version || 1,
       updatedAt: raw.updatedAt || nowISO(),
@@ -145,6 +159,12 @@ const Store = (() => {
       nodes,
       sessions,
       focus,
+      problems,
+      applications,
+      tagMap,
+      sources: (Array.isArray(raw.sources) ? raw.sources : [])
+        .filter(x => x && x.id && x.label)
+        .map(x => ({ id: String(x.id), label: String(x.label) })),
     };
   }
 
@@ -257,8 +277,15 @@ const Store = (() => {
 
     const node = byId(id);
     if (!node) return 0;
-    if (node.items.length) return node.items.filter(i => i.done).length / node.items.length;
-    return STATUS_BY_ID[node.status].weight;
+
+    /* Whichever piece of evidence claims the most: the status you set, the
+       checklist you ticked, or the problems you solved against a target. */
+    const claims = [STATUS_BY_ID[node.status].weight];
+    if (node.items.length) claims.push(node.items.filter(i => i.done).length / node.items.length);
+    if (node.problemTarget > 0) {
+      claims.push(Math.min(1, problemsForNode(node.id).length / node.problemTarget));
+    }
+    return Math.max(...claims);
   }
 
   function checklistOf(id) {
@@ -399,14 +426,22 @@ const Store = (() => {
     return item;
   }
 
+  /* Ticking the last item is a claim that the topic is done, so the status
+     follows. Un-ticking never demotes: the status is yours to lower. */
   function toggleItem(nodeId, itemId) {
     const node = byId(nodeId);
     const item = node && node.items.find(i => i.id === itemId);
     if (!item) return null;
+
     item.done = !item.done;
     node.updatedAt = todayISO();
+
+    const complete = node.items.length > 0 && node.items.every(i => i.done);
+    const promoted = complete && node.status !== 'mastered';
+    if (promoted) node.status = 'mastered';
+
     persist();
-    return item;
+    return { item, promoted };
   }
 
   function updateItem(nodeId, itemId, patch) {
@@ -427,6 +462,178 @@ const Store = (() => {
     node.updatedAt = todayISO();
     persist();
   }
+
+  /* ---------------- solved problems ---------------- */
+
+  const PROBLEM_SOURCES = [
+    { id: 'leetcode',     label: 'LeetCode'      },
+    { id: 'codeforces',   label: 'Codeforces'    },
+    { id: 'projecteuler', label: 'Project Euler' },
+    { id: 'cses',         label: 'CSES'          },
+    { id: 'atcoder',      label: 'AtCoder'       },
+    { id: 'other',        label: 'Other'         },
+  ];
+
+  /* A solve is a discrete event with an identity, not just time spent, which
+     is why it is kept apart from sessions: it can be counted and grouped. */
+  function normalizeProblem(p) {
+    const perceived = Number(p.perceived);
+    const difficulty = Number(p.difficulty);
+    return {
+      id:        String(p.id || uid('p')),
+      source:    String(p.source || 'other'),
+      problemId: String(p.problemId || '').trim(),
+      title:     String(p.title || p.problemId || 'Untitled problem').trim(),
+      url:       p.url ? String(p.url) : '',
+      tags:      Array.isArray(p.tags) ? [...new Set(p.tags.map(t => String(t).trim().toLowerCase()).filter(Boolean))] : [],
+      difficulty: Number.isFinite(difficulty) && difficulty > 0 ? difficulty : null,
+      /* How hard it felt, 1 (easy) to 5 (brutal) — independent of any rating. */
+      perceived: perceived >= 1 && perceived <= 5 ? Math.round(perceived) : null,
+      solvedAt:  String(p.solvedAt || todayISO()).slice(0, 10),
+      minutes:   Math.max(0, Number(p.minutes) || 0),
+      notes:     typeof p.notes === 'string' ? p.notes : '',
+      nodeId:    p.nodeId ? String(p.nodeId) : null,
+    };
+  }
+
+  /* Identity across imports: the same problem on the same site is one solve. */
+  const problemKey = p => `${p.source}:${String(p.problemId || p.title).toLowerCase()}`;
+
+  const sourceLabel = id =>
+    (PROBLEM_SOURCES.find(s => s.id === id) || {}).label ||
+    (state.sources.find(s => s.id === id) || {}).label || id;
+
+  const allSources = () => [...PROBLEM_SOURCES, ...state.sources];
+
+  function addSource(label) {
+    const clean = String(label || '').trim();
+    if (!clean) return null;
+    const id = clean.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    if (!id || allSources().some(s => s.id === id)) return null;
+    const source = { id, label: clean };
+    state.sources.push(source);
+    persist();
+    return source;
+  }
+
+  function addProblem(data) {
+    const problem = normalizeProblem({ ...data, id: uid('p') });
+    if (!problem.title) return null;
+    state.problems.push(problem);
+    persist();
+    return problem;
+  }
+
+  function updateProblem(id, patch) {
+    const problem = state.problems.find(p => p.id === id);
+    if (!problem) return null;
+    Object.assign(problem, normalizeProblem({ ...problem, ...patch, id: problem.id }));
+    persist();
+    return problem;
+  }
+
+  function deleteProblem(id) {
+    state.problems = state.problems.filter(p => p.id !== id);
+    persist();
+  }
+
+  /* The entry point an importer or browser extension writes through: the same
+     solve arriving twice updates rather than duplicates. */
+  function recordSolve(data) {
+    const incoming = normalizeProblem({ ...data, id: uid('p') });
+    if (!incoming.problemId && !incoming.title) return { problem: null, created: false };
+
+    const existing = state.problems.find(p => problemKey(p) === problemKey(incoming));
+    if (existing) {
+      /* Keep whatever the person wrote themselves. */
+      existing.tags = [...new Set([...existing.tags, ...incoming.tags])];
+      if (incoming.difficulty && !existing.difficulty) existing.difficulty = incoming.difficulty;
+      if (incoming.url && !existing.url) existing.url = incoming.url;
+      if (incoming.solvedAt < existing.solvedAt) existing.solvedAt = incoming.solvedAt;
+      persist();
+      return { problem: existing, created: false };
+    }
+
+    if (!incoming.nodeId) incoming.nodeId = nodeForTags(incoming.tags);
+    state.problems.push(incoming);
+    persist();
+    return { problem: incoming, created: true };
+  }
+
+  function recordSolves(list) {
+    if (!Array.isArray(list)) return { added: 0, updated: 0 };
+    let added = 0, updated = 0;
+    list.forEach(item => {
+      const { problem, created } = recordSolve(item);
+      if (!problem) return;
+      created ? added++ : updated++;
+    });
+    return { added, updated };
+  }
+
+  /* ---------------- tag to topic mapping ---------------- */
+
+  /* Solving problems is evidence about a topic, but only once the site's tags
+     are mapped onto the tree. The mapping is deliberately manual: automatic
+     guesses are never quite right. */
+  function setTagMapping(tag, nodeId) {
+    const key = String(tag || '').trim().toLowerCase();
+    if (!key) return;
+    if (nodeId) state.tagMap[key] = String(nodeId);
+    else delete state.tagMap[key];
+    persist();
+  }
+
+  const nodeForTags = tags =>
+    (tags || []).map(t => state.tagMap[t]).find(id => id && byId(id)) || null;
+
+  /* Every tag seen on a solve, with how often and where it points. */
+  function tagIndex(filter = {}) {
+    const counts = new Map();
+    problemsMatching(filter).forEach(p => {
+      p.tags.forEach(t => counts.set(t, (counts.get(t) || 0) + 1));
+    });
+    return [...counts.entries()]
+      .map(([tag, count]) => ({ tag, count, nodeId: state.tagMap[tag] || null }))
+      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+  }
+
+  function problemsMatching({ source = '', tag = '', since = '' } = {}) {
+    return state.problems.filter(p =>
+      (!source || p.source === source) &&
+      (!tag || p.tags.includes(tag)) &&
+      (!since || p.solvedAt >= since));
+  }
+
+  /* Problems that count towards a topic: mapped directly, or by one of their
+     tags, and anything solved under a child topic counts for the parent too. */
+  function problemsForNode(nodeId, includeDescendants = true) {
+    const ids = new Set([nodeId, ...(includeDescendants ? descendantsOf(nodeId).map(n => n.id) : [])]);
+    return state.problems.filter(p => {
+      const mapped = p.nodeId || nodeForTags(p.tags);
+      return mapped && ids.has(mapped);
+    });
+  }
+
+  function problemStats(filter = {}) {
+    const list = problemsMatching(filter);
+    const rated = list.filter(p => p.difficulty);
+    const felt  = list.filter(p => p.perceived);
+    const week  = shiftDays(todayISO(), -7);
+
+    return {
+      total:     list.length,
+      thisWeek:  list.filter(p => p.solvedAt >= week).length,
+      sources:   [...new Set(list.map(p => p.source))].length,
+      hardest:   rated.length ? Math.max(...rated.map(p => p.difficulty)) : null,
+      avgFelt:   felt.length ? felt.reduce((sum, p) => sum + p.perceived, 0) / felt.length : null,
+      minutes:   list.reduce((sum, p) => sum + p.minutes, 0),
+      unmapped:  list.filter(p => !(p.nodeId || nodeForTags(p.tags))).length,
+    };
+  }
+
+  const recentProblems = (limit = 10) =>
+    state.problems.slice().sort((a, b) => b.solvedAt.localeCompare(a.solvedAt)).slice(0, limit);
 
   /* ---------------- private branches ---------------- */
 
@@ -509,6 +716,123 @@ const Store = (() => {
     return { total: tasks.length, done, ratio: tasks.length ? done / tasks.length : 0 };
   }
 
+  /* ---------------- job applications ---------------- */
+
+  /* Applications are ALWAYS private. They are never written to the public
+     snapshot, whatever else is marked private — losing control of where you
+     applied and who rejected you is not a mistake worth making possible. */
+  const APP_STAGES = [
+    { id: 'wishlist',   label: 'Wishlist',   open: true  },
+    { id: 'applied',    label: 'Applied',    open: true  },
+    { id: 'screen',     label: 'Screening',  open: true  },
+    { id: 'assessment', label: 'Assessment', open: true  },
+    { id: 'interview',  label: 'Interview',  open: true  },
+    { id: 'offer',      label: 'Offer',      open: false },
+    { id: 'rejected',   label: 'Rejected',   open: false },
+    { id: 'withdrawn',  label: 'Withdrawn',  open: false },
+  ];
+  const STAGE_BY_ID = Object.fromEntries(APP_STAGES.map(s => [s.id, s]));
+
+  function normalizeApplication(a) {
+    return {
+      id:       String(a.id || uid('a')),
+      company:  String(a.company || '').trim(),
+      role:     String(a.role || '').trim(),
+      location: String(a.location || '').trim(),
+      url:      a.url ? String(a.url) : '',
+      source:   String(a.source || '').trim(),
+      stage:    STAGE_BY_ID[a.stage] ? a.stage : 'applied',
+      appliedAt: String(a.appliedAt || todayISO()).slice(0, 10),
+      deadline: a.deadline ? String(a.deadline).slice(0, 10) : '',
+      nextAction: String(a.nextAction || '').trim(),
+      nextDue:  a.nextDue ? String(a.nextDue).slice(0, 10) : '',
+      notes:    typeof a.notes === 'string' ? a.notes : '',
+      events:   Array.isArray(a.events) ? a.events.map(e => ({
+        id:    String(e.id || uid('e')),
+        date:  String(e.date || todayISO()).slice(0, 10),
+        stage: STAGE_BY_ID[e.stage] ? e.stage : 'applied',
+        note:  typeof e.note === 'string' ? e.note : '',
+      })).sort((x, y) => x.date.localeCompare(y.date)) : [],
+      updatedAt: a.updatedAt || todayISO(),
+    };
+  }
+
+  const applications = () => state.applications.slice()
+    .sort((a, b) => b.appliedAt.localeCompare(a.appliedAt));
+
+  function addApplication(data) {
+    const app = normalizeApplication({ ...data, id: uid('a') });
+    if (!app.company) return null;
+    if (!app.events.length) {
+      app.events.push({ id: uid('e'), date: app.appliedAt, stage: app.stage, note: 'Added' });
+    }
+    state.applications.push(app);
+    persist();
+    return app;
+  }
+
+  /* A stage change is worth remembering as a dated event, because the shape of
+     a search is in its timeline, not just its current state. */
+  function updateApplication(id, patch) {
+    const app = state.applications.find(a => a.id === id);
+    if (!app) return null;
+    const before = app.stage;
+    Object.assign(app, normalizeApplication({ ...app, ...patch, id: app.id }));
+    if (patch.stage && patch.stage !== before) {
+      app.events.push({ id: uid('e'), date: todayISO(), stage: patch.stage, note: '' });
+    }
+    app.updatedAt = todayISO();
+    persist();
+    return app;
+  }
+
+  function deleteApplication(id) {
+    state.applications = state.applications.filter(a => a.id !== id);
+    persist();
+  }
+
+  function addApplicationEvent(id, { date, stage, note }) {
+    const app = state.applications.find(a => a.id === id);
+    if (!app) return null;
+    const event = {
+      id: uid('e'),
+      date: String(date || todayISO()).slice(0, 10),
+      stage: STAGE_BY_ID[stage] ? stage : app.stage,
+      note: String(note || ''),
+    };
+    app.events.push(event);
+    app.events.sort((x, y) => x.date.localeCompare(y.date));
+    persist();
+    return event;
+  }
+
+  function deleteApplicationEvent(appId, eventId) {
+    const app = state.applications.find(a => a.id === appId);
+    if (!app) return;
+    app.events = app.events.filter(e => e.id !== eventId);
+    persist();
+  }
+
+  function applicationStats() {
+    const all = state.applications;
+    const inStage = id => all.filter(a => a.stage === id).length;
+    const responded = all.filter(a => a.stage !== 'applied' && a.stage !== 'wishlist').length;
+    const sent = all.filter(a => a.stage !== 'wishlist').length;
+
+    return {
+      total:     all.length,
+      open:      all.filter(a => STAGE_BY_ID[a.stage].open).length,
+      offers:    inStage('offer'),
+      rejected:  inStage('rejected'),
+      interviews: all.filter(a => a.events.some(e => e.stage === 'interview')).length,
+      responseRate: sent ? responded / sent : 0,
+      /* Anything with a date that has arrived, or is about to. */
+      dueSoon: all.filter(a => a.nextDue && a.nextDue <= shiftDays(todayISO(), 3)
+                            && STAGE_BY_ID[a.stage].open)
+                  .sort((a, b) => a.nextDue.localeCompare(b.nextDue)),
+    };
+  }
+
   /* ---------------- import / export ---------------- */
 
   /* The state is split in two on the way out: the public snapshot is what gets
@@ -530,26 +854,37 @@ const Store = (() => {
       focus: state.focus
         .filter(t => (t.nodeId ? priv.has(t.nodeId) === wantPrivate : !wantPrivate))
         .sort((a, b) => a.date.localeCompare(b.date)),
+      /* A solve follows the topic it counts towards. */
+      problems: state.problems
+        .filter(p => {
+          const mapped = p.nodeId || nodeForTags(p.tags);
+          return (mapped ? priv.has(mapped) : false) === wantPrivate;
+        })
+        .sort((a, b) => a.solvedAt.localeCompare(b.solvedAt)),
+      /* Applications only ever exist in the private half. */
+      applications: wantPrivate ? state.applications : [],
     };
   }
 
   function toJSON() {
-    const { nodes, sessions, focus } = partition(false);
+    const { nodes, sessions, focus, problems } = partition(false);
     return JSON.stringify({
       version: state.version, updatedAt: state.updatedAt, profile: state.profile,
-      nodes, sessions, focus,
+      nodes, sessions, focus, problems,
+      tagMap: state.tagMap, sources: state.sources,
     }, null, 2);
   }
 
   function toPrivateJSON() {
-    const { nodes, sessions, focus } = partition(true);
+    const { nodes, sessions, focus, problems, applications } = partition(true);
     return JSON.stringify({
       version: state.version, updatedAt: state.updatedAt, private: true,
-      nodes, sessions, focus,
+      nodes, sessions, focus, problems, applications,
     }, null, 2);
   }
 
-  const hasPrivateData = () => state.nodes.some(n => isPrivate(n.id));
+  const hasPrivateData = () =>
+    state.nodes.some(n => isPrivate(n.id)) || state.applications.length > 0;
 
   function importJSON(text) {
     const parsed = JSON.parse(text);
@@ -566,12 +901,15 @@ const Store = (() => {
      is harmless. */
   function mergeJSON(text) {
     const parsed = typeof text === 'string' ? JSON.parse(text) : text;
-    if (!parsed || !Array.isArray(parsed.nodes)) return 0;
+    if (!parsed) return 0;
+    if (!Array.isArray(parsed.nodes)) parsed.nodes = [];
 
     /* Every collection is deduplicated by id, or merging the same file twice
        would double the logged time and the checklists. */
     const haveSessions = new Set(state.sessions.map(x => x.id));
     const haveFocus    = new Set(state.focus.map(x => x.id));
+    const haveProblems = new Set(state.problems.map(x => x.id));
+    const haveApps     = new Set(state.applications.map(x => x.id));
 
     const merged = normalize({
       version:  state.version,
@@ -579,6 +917,10 @@ const Store = (() => {
       nodes:    [...state.nodes, ...parsed.nodes.filter(n => !byId(String(n.id)))],
       sessions: [...state.sessions, ...(parsed.sessions || []).filter(x => !haveSessions.has(String(x.id)))],
       focus:    [...state.focus, ...(parsed.focus || []).filter(x => !haveFocus.has(String(x.id)))],
+      problems: [...state.problems, ...(parsed.problems || []).filter(x => !haveProblems.has(String(x.id)))],
+      applications: [...state.applications, ...(parsed.applications || []).filter(x => !haveApps.has(String(x.id)))],
+      tagMap:   { ...(parsed.tagMap || {}), ...state.tagMap },
+      sources:  state.sources,
     });
 
     const added = merged.nodes.length - state.nodes.length;
@@ -615,7 +957,13 @@ const Store = (() => {
     focusFor, focusDates, focusSummary, addTask, toggleTask, updateTask, deleteTask, carryOverTo,
     addNode, updateNode, deleteNode, addSession, deleteSession, updateProfile,
     addItem, toggleItem, updateItem, deleteItem, checklistOf,
+    PROBLEM_SOURCES, allSources, addSource, sourceLabel,
+    addProblem, updateProblem, deleteProblem, recordSolve, recordSolves,
+    problemsMatching, problemsForNode, problemStats, recentProblems,
+    tagIndex, setTagMapping, nodeForTags,
     isPrivate, privateNodeIds,
+    APP_STAGES, STAGE_BY_ID, applications, addApplication, updateApplication,
+    deleteApplication, addApplicationEvent, deleteApplicationEvent, applicationStats,
     toJSON, toPrivateJSON, hasPrivateData, importJSON, mergeJSON, adoptSeed, resetToSeed,
     todayISO, shiftDays, dayOfWeek, uid,
   };

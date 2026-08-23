@@ -28,13 +28,15 @@ window.fetch = async url => (String(url).includes('learning.json')
   ? { ok: true, json: async () => JSON.parse(seed) }
   : { ok: false, status: 404 });
 window.confirm = () => true;
+window.prompt = () => 'Advent of Code';
 window.alert = msg => errors.push('alert(): ' + msg);
 window.matchMedia = () => ({ matches: false, addEventListener() {} });
 
-const bundle = ['js/store.js', 'js/tree.js', 'js/views.js', 'js/app.js']
+const bundle = ['js/store.js', 'js/tree.js', 'js/views.js', 'js/problems.js', 'js/applications.js', 'js/app.js']
   .map(f => fs.readFileSync(path.join(ROOT, f), 'utf8'))
   .join(String.fromCharCode(10) + ';' + String.fromCharCode(10));
-window.eval(bundle + ';window.Store = Store; window.Tree = Tree; window.Views = Views;');
+window.eval(bundle + ';window.Store = Store; window.Tree = Tree; window.Views = Views;' +
+  'window.Problems = Problems; window.Applications = Applications;');
 
 await new Promise(r => setTimeout(r, 300));
 
@@ -172,14 +174,15 @@ const rows = $$('#inspectorBody .check-row');
 const lastRow = rows[rows.length - 1];
 click(lastRow.querySelector('.task-check'));
 check('ticking an item sticks', Store.byId('hpc-openmp').items.slice(-1)[0].done === true);
+check('finishing the checklist promotes the status', Store.byId('hpc-openmp').status === 'mastered',
+      Store.byId('hpc-openmp').status);
 
-// progress now follows the checklist, not the status
+// progress takes the strongest claim available
 const done = Store.checklistOf('hpc-openmp');
-check('progress equals the checklist ratio',
-      Math.abs(Store.progressOf('hpc-openmp') - done.done / done.total) < 1e-9,
+check('a finished checklist reads 100%', Store.progressOf('hpc-openmp') === 1,
       `${Store.progressOf('hpc-openmp')} vs ${done.done}/${done.total}`);
 check('progress explains itself',
-      /checklist item/.test($('.progress-source').textContent), $('.progress-source')?.textContent);
+      /checklist \(/.test($('.progress-source').textContent), $('.progress-source')?.textContent);
 check('the card shows the checklist count', !!nodeNamed('OpenMP').querySelector('.card-check'));
 
 click($$('#inspectorBody .check-row .task-del').slice(-1)[0]);
@@ -394,19 +397,153 @@ check('task deleted', Store.focusFor(Store.todayISO()).length === countBeforeDel
 // focus tasks survive an export/import round-trip
 check('focus included in export', JSON.parse(Store.toJSON()).focus.length === Store.state.focus.length);
 
+/* ---------- 7c. problems ---------- */
+click($$('.tab-fixed').find(t => t.dataset.view === 'problems'));
+check('problems view shown', !$('#view-problems').hidden);
+check('platform chips offered', $$('#problemSources .chip-btn').length >= 6,
+      `${$$('#problemSources .chip-btn').length} chips`);
+check('LeetCode is there by default', /LeetCode/.test($('#problemSources').textContent));
+check('Codeforces is there by default', /Codeforces/.test($('#problemSources').textContent));
+check('Project Euler is there by default', /Project Euler/.test($('#problemSources').textContent));
+check('starts with nothing solved', $('#problemList .list-empty') !== null);
+
+// add a solve by hand
+const pform = $('#problemForm');
+pform.querySelector('[name="source"]').value = 'codeforces';
+pform.querySelector('[name="problemId"]').value = '1234A';
+pform.querySelector('[name="title"]').value = 'Knapsack Variant';
+pform.querySelector('[name="tags"]').value = 'dp, greedy';
+pform.querySelector('[name="difficulty"]').value = '1600';
+pform.querySelector('[name="solvedAt"]').value = Store.todayISO();
+pform.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('solve recorded', Store.problemsMatching().length === 1);
+check('row rendered', $$('#problemList .problem-row').length === 1);
+check('tags shown on the row', /dp/.test($('#problemList .p-tags').textContent));
+check('it opens for editing straight away', !!$('.problem-detail'));
+
+// how hard it felt
+click($$('.problem-detail [data-felt]')[3]);
+check('perceived difficulty saved', Store.problemsMatching()[0].perceived === 4,
+      String(Store.problemsMatching()[0].perceived));
+
+// notes per problem
+const pnotes = $('#pd-notes');
+pnotes.value = 'Sort by weight first, then classic knapsack.';
+fire(pnotes, 'blur');
+check('problem notes saved', /knapsack/.test(Store.problemsMatching()[0].notes));
+
+// tag counts
+check('tag breakdown rendered', $$('#problemTags .tag-row').length === 2,
+      `${$$('#problemTags .tag-row').length} tags`);
+check('a tag starts unmapped', /unmapped/.test($('#problemTags').textContent));
+
+// map a tag onto a topic so the solve becomes evidence
+const mapSelect = $('#tagMapping [data-map="dp"]');
+check('mapping table lists the tag', !!mapSelect);
+mapSelect.value = 'cpp-algorithms';
+fire(mapSelect, 'change');
+check('tag mapped to a topic', Store.nodeForTags(['dp']) === 'cpp-algorithms');
+check('the solve now counts for that topic', Store.problemsForNode('cpp-algorithms').length === 1);
+check('and for its parent', Store.problemsForNode('cpp').length === 1);
+
+// filter by platform
+click($$('#problemSources .chip-btn').find(b => /LeetCode/.test(b.textContent)));
+check('filtering by platform empties the list', $$('#problemList .problem-row').length === 0);
+click($$('#problemSources .chip-btn').find(b => /^All/.test(b.textContent)));
+check('clearing the filter restores it', $$('#problemList .problem-row').length === 1);
+
+// a new platform of your own
+click($('#problemSources .chip-add'));
+check('a custom platform can be added', Store.allSources().some(s => s.label === 'Advent of Code'));
+
+// bulk import, the path the extension will use
+const beforeImport = Store.problemsMatching().length;
+const importResult = window.Problems.importSolves(JSON.stringify([
+  { source: 'codeforces', problemId: '9B', title: 'Graph Walk', tags: ['graphs'], solvedAt: Store.todayISO() },
+  { source: 'codeforces', problemId: '1234A', title: 'Knapsack Variant', tags: ['dp'], solvedAt: Store.todayISO() },
+]));
+check('import adds what is new', importResult.added === 1, JSON.stringify(importResult));
+check('and skips what is known', importResult.updated === 1, JSON.stringify(importResult));
+check('no duplicate created', Store.problemsMatching().length === beforeImport + 1);
+
+// the extension-facing bridge
+check('a solve bridge is exposed', typeof window.DevTracker.recordSolves === 'function');
+window.DevTracker.recordSolves([{ source: 'leetcode', problemId: 'two-sum', title: 'Two Sum', tags: ['array'] }]);
+check('the bridge records solves', Store.problemsMatching({ source: 'leetcode' }).length === 1);
+
+// problems feed the learning metric through a target
+click(tabNamed('All'));          // the tree was last rooted on a single field
+clickNode('Algorithms');
+check('inspector offers a problem target', !!$('#f-target'));
+$('#f-target').value = '4';
+fire($('#f-target'), 'change');
+check('target saved', Store.byId('cpp-algorithms').problemTarget === 4);
+check('progress counts the solves', Store.progressOf('cpp-algorithms') >= 0.25,
+      String(Store.progressOf('cpp-algorithms')));
+check('the inspector cites the evidence', /problem/.test($('.progress-evidence').textContent),
+      $('.progress-evidence')?.textContent);
+
+/* ---------- 7d. applications, and their privacy ---------- */
+click($$('.tab-fixed').find(t => t.dataset.view === 'apps'));
+check('applications view shown', !$('#view-apps').hidden);
+check('it states that it is private', /never/.test($('.private-note').textContent));
+check('starts empty', $('#appBoard .list-empty') !== null);
+
+const aform = $('#appForm');
+aform.querySelector('[name="company"]').value = 'Example Corp';
+aform.querySelector('[name="role"]').value = 'Software Engineer Intern';
+aform.querySelector('[name="location"]').value = 'London';
+aform.querySelector('[name="appliedAt"]').value = Store.todayISO();
+aform.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('application added', Store.applications().length === 1);
+check('row rendered under its stage', $$('#appBoard .app-row').length === 1);
+check('grouped by stage', /Applied/.test($('#appBoard .app-stage-head').textContent));
+check('it opens for editing', !!$('.app-detail'));
+check('a timeline starts immediately', $$('.app-detail .tl-row').length === 1);
+
+// move it through the pipeline
+const stageSel = $('#appBoard .app-stage');
+stageSel.value = 'interview';
+fire(stageSel, 'change');
+check('stage change applied', Store.applications()[0].stage === 'interview');
+check('and recorded on the timeline', Store.applications()[0].events.length === 2);
+
+// a next action that is overdue surfaces at the top
+const appId = Store.applications()[0].id;
+Store.updateApplication(appId, { nextAction: 'Send follow-up', nextDue: Store.shiftDays(Store.todayISO(), -1) });
+window.Applications.render();
+check('overdue work is surfaced', !$('#appDue').hidden);
+check('and marked late', !!$('#appDue .due-row.is-late'));
+
+// notes — the panel is already open from adding it, so only open if it is not
+if (!$('#ad-notes')) click($$('#appBoard .app-row')[0]);
+const anotes = $('#ad-notes');
+anotes.value = 'Spoke to the recruiter, assessment next week.';
+fire(anotes, 'blur');
+check('application notes saved', /recruiter/.test(Store.applications()[0].notes));
+
+// THE guarantee
+const publicJson = Store.toJSON();
+check('no company name in the public snapshot', !/Example Corp/.test(publicJson));
+check('no applications key in the public snapshot', JSON.parse(publicJson).applications === undefined);
+check('no notes leak either', !/recruiter/.test(publicJson));
+check('they are in the private export', JSON.parse(Store.toPrivateJSON()).applications.length === 1);
+check('holding one counts as private data', Store.hasPrivateData() === true);
+check('the public export still carries the solves', JSON.parse(publicJson).problems.length > 0);
+
 /* ---------- 8. stats still fine ---------- */
 click($$('.tab-fixed').find(t => t.dataset.view === 'stats'));
 check('stats view shown', !$('#view-stats').hidden);
-check('stat cards rendered', $$('#statCards .stat-card').length === 5);
+check('stat cards rendered', $$('#statCards .stat-card').length === 6);
 check('heatmap rendered', $$('#heatmap .hm-cell').length === 26 * 7 + 7);
 check('progress bar per field', $$('#domainProgress .dp-row').length === 5);
 
 /* ---------- 9. ui state remembered ---------- */
 const ui = JSON.parse(window.localStorage.getItem('learning-tree/ui/v1'));
 check('active view persisted', ui.currentView === 'stats', JSON.stringify(ui));
-// Selecting a Mathematics topic from the list moves the tree tab with it, so
-// the node is never selected-but-invisible when the tree comes back.
-check('active field follows the selection', ui.activeField === 'math', JSON.stringify(ui));
+// What is persisted always matches what the tree is actually showing.
+check('active field matches the tree root', ui.activeField === Tree.rootId, JSON.stringify(ui));
+check('inspector width persisted', Number.isFinite(ui.inspectorWidth), JSON.stringify(ui));
 check('the new field still exists', !!Store.byId(newFieldId));
 
 if (errors.length) {
