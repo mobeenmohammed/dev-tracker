@@ -141,6 +141,20 @@ const Store = (() => {
 
     const problems = (Array.isArray(raw.problems) ? raw.problems : []).map(normalizeProblem);
 
+    const projects = (Array.isArray(raw.projects) ? raw.projects : [])
+      .map(normalizeProject)
+      .filter(p => p.name)
+      /* A concept pointing at a deleted topic is dropped; the project stays. */
+      .map(p => ({ ...p, concepts: p.concepts.filter(c => ids.has(c.nodeId)) }));
+
+    const goals = (Array.isArray(raw.goals) ? raw.goals : [])
+      .map(normalizeGoal)
+      .filter(g => g.name)
+      /* A part pointing at a deleted topic becomes a plain checkbox rather
+         than vanishing: the intention was real. */
+      .map(g => ({ ...g, parts: g.parts.map(p =>
+        (p.nodeId && !ids.has(p.nodeId) ? { ...p, kind: 'manual', nodeId: null } : p)) }));
+
     const journal = (Array.isArray(raw.journal) ? raw.journal : [])
       .map(normalizeEntry)
       .filter(e => e.text && ids.has(e.nodeId));
@@ -181,6 +195,8 @@ const Store = (() => {
       applications,
       links,
       journal,
+      goals,
+      projects,
       tagMap,
       sources: (Array.isArray(raw.sources) ? raw.sources : [])
         .filter(x => x && x.id && x.label)
@@ -696,7 +712,7 @@ const Store = (() => {
   const PROBLEM_SOURCES = [
     { id: 'leetcode',     label: 'LeetCode'            },
     { id: 'codeforces',   label: 'Codeforces'          },
-    { id: 'projecteuler', label: 'Project Euler'       },
+    { id: 'projecteuler', label: 'Project Euler'     },
     { id: 'cses',         label: 'CSES'                },
     { id: 'atcoder',      label: 'AtCoder'             },
     { id: 'university',   label: 'University problem set' },
@@ -1076,6 +1092,262 @@ const Store = (() => {
     return { total: tasks.length, done, ratio: tasks.length ? done / tasks.length : 0 };
   }
 
+  /* ---------------- goals ---------------- */
+
+  /* Fields are open-ended by nature — you never finish Mathematics. A goal is
+     the opposite: a few concrete things, by a date. Its parts are checked off
+     by hand or answered by the tracker itself, so progress is not a second
+     thing to maintain. */
+  const GOAL_TARGETS = [
+    { id: 'manual',    label: 'Something I tick off myself' },
+    { id: 'status',    label: 'A topic reaches a status'    },
+    { id: 'checklist', label: 'A topic’s checklist is done' },
+    { id: 'problems',  label: 'Solve N problems in a topic' },
+    { id: 'sessions',  label: 'Log N hours on a topic'      },
+  ];
+
+  function normalizeGoalPart(part) {
+    return {
+      id:     String(part.id || uid('gp')),
+      kind:   GOAL_TARGETS.some(t => t.id === part.kind) ? part.kind : 'manual',
+      text:   String(part.text || '').trim(),
+      nodeId: part.nodeId ? String(part.nodeId) : null,
+      /* How many problems, how many hours, or which status to reach. */
+      amount: Math.max(0, Number(part.amount) || 0),
+      status: STATUS_BY_ID[part.status] ? part.status : 'proficient',
+      done:   !!part.done,
+    };
+  }
+
+  function normalizeGoal(g) {
+    return {
+      id:        String(g.id || uid('g')),
+      name:      String(g.name || '').trim(),
+      targetDate: g.targetDate ? String(g.targetDate).slice(0, 10) : '',
+      createdAt: g.createdAt || todayISO(),
+      archived:  !!g.archived,
+      parts:     Array.isArray(g.parts) ? g.parts.map(normalizeGoalPart).filter(p => p.text || p.nodeId) : [],
+    };
+  }
+
+  /* What a single part is worth right now, between 0 and 1. */
+  function partProgress(part) {
+    if (part.kind === 'manual') return part.done ? 1 : 0;
+
+    const node = part.nodeId ? byId(part.nodeId) : null;
+    if (!node) return part.done ? 1 : 0;
+
+    if (part.kind === 'status') {
+      const order = STATUSES.map(s => s.id);
+      return order.indexOf(node.status) >= order.indexOf(part.status) ? 1 : 0;
+    }
+    if (part.kind === 'checklist') {
+      const list = checklistOf(node.id);
+      return list.total ? list.done / list.total : 0;
+    }
+    if (part.kind === 'problems') {
+      if (!part.amount) return 0;
+      return Math.min(1, problemsForNode(node.id).length / part.amount);
+    }
+    if (part.kind === 'sessions') {
+      if (!part.amount) return 0;
+      return Math.min(1, minutesFor(node.id, true) / (part.amount * 60));
+    }
+    return 0;
+  }
+
+  function goalProgress(goal) {
+    if (!goal.parts.length) return { ratio: 0, done: 0, total: 0 };
+    const values = goal.parts.map(partProgress);
+    const ratio = values.reduce((sum, v) => sum + v, 0) / values.length;
+    return { ratio, done: values.filter(v => v >= 1).length, total: values.length };
+  }
+
+  /* Days left, which is the half of a goal that a percentage cannot express. */
+  const daysRemaining = goal =>
+    goal.targetDate ? daysBetween(todayISO(), goal.targetDate) : null;
+
+  const goals = () => state.goals
+    .filter(g => !g.archived)
+    .sort((a, b) => (a.targetDate || '9999').localeCompare(b.targetDate || '9999'));
+
+  function addGoal({ name, targetDate }) {
+    const goal = normalizeGoal({ id: uid('g'), name, targetDate });
+    if (!goal.name) return null;
+    state.goals.push(goal);
+    persist();
+    return goal;
+  }
+
+  function updateGoal(id, patch) {
+    const goal = state.goals.find(g => g.id === id);
+    if (!goal) return null;
+    Object.assign(goal, normalizeGoal({ ...goal, ...patch, id: goal.id }));
+    persist();
+    return goal;
+  }
+
+  function deleteGoal(id) {
+    state.goals = state.goals.filter(g => g.id !== id);
+    persist();
+  }
+
+  function addGoalPart(goalId, part) {
+    const goal = state.goals.find(g => g.id === goalId);
+    if (!goal) return null;
+    const built = normalizeGoalPart({ ...part, id: uid('gp') });
+    if (!built.text && !built.nodeId) return null;
+    goal.parts.push(built);
+    persist();
+    return built;
+  }
+
+  function toggleGoalPart(goalId, partId) {
+    const goal = state.goals.find(g => g.id === goalId);
+    const part = goal && goal.parts.find(p => p.id === partId);
+    if (!part) return null;
+    part.done = !part.done;
+    persist();
+    return part;
+  }
+
+  function deleteGoalPart(goalId, partId) {
+    const goal = state.goals.find(g => g.id === goalId);
+    if (!goal) return;
+    goal.parts = goal.parts.filter(p => p.id !== partId);
+    persist();
+  }
+
+  /* ---------------- projects ---------------- */
+
+  /* Concepts and problems say what you have studied and practised. A project
+     says what you have actually built with it, which is a different and often
+     more convincing claim: "I have studied CI/CD" against "CI runs on every
+     push to this repository". */
+  const PROJECT_STATES = [
+    { id: 'idea',     label: 'Idea',     open: true  },
+    { id: 'building', label: 'Building', open: true  },
+    { id: 'paused',   label: 'Paused',   open: true  },
+    { id: 'shipped',  label: 'Shipped',  open: false },
+    { id: 'archived', label: 'Archived', open: false },
+  ];
+  const PROJECT_STATE_IDS = PROJECT_STATES.map(s => s.id);
+
+  function normalizeProject(p) {
+    return {
+      id:        String(p.id || uid('pr')),
+      name:      String(p.name || '').trim(),
+      summary:   typeof p.summary === 'string' ? p.summary : '',
+      repo:      p.repo ? String(p.repo).trim() : '',
+      state:     PROJECT_STATE_IDS.includes(p.state) ? p.state : 'building',
+      tech:      Array.isArray(p.tech) ? [...new Set(p.tech.map(t => String(t).trim()).filter(Boolean))] : [],
+      startedAt: String(p.startedAt || todayISO()).slice(0, 10),
+      private:   !!p.private,
+      milestones: Array.isArray(p.milestones) ? p.milestones.map(m => ({
+        id:   String(m.id || uid('pm')),
+        text: String(m.text || '').trim(),
+        done: !!m.done,
+      })).filter(m => m.text) : [],
+      /* The interesting part: which topics this project is evidence for. */
+      concepts: Array.isArray(p.concepts) ? p.concepts.map(c => ({
+        nodeId:   String(c.nodeId),
+        evidence: typeof c.evidence === 'string' ? c.evidence.trim() : '',
+      })).filter(c => c.nodeId) : [],
+    };
+  }
+
+  const projects = () => state.projects.slice()
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+
+  function projectProgress(project) {
+    if (!project.milestones.length) return { ratio: project.state === 'shipped' ? 1 : 0, done: 0, total: 0 };
+    const done = project.milestones.filter(m => m.done).length;
+    return { ratio: done / project.milestones.length, done, total: project.milestones.length };
+  }
+
+  function addProject(data) {
+    const project = normalizeProject({ ...data, id: uid('pr') });
+    if (!project.name) return null;
+    state.projects.push(project);
+    persist();
+    return project;
+  }
+
+  function updateProject(id, patch) {
+    const project = state.projects.find(p => p.id === id);
+    if (!project) return null;
+    Object.assign(project, normalizeProject({ ...project, ...patch, id: project.id }));
+    persist();
+    return project;
+  }
+
+  function deleteProject(id) {
+    state.projects = state.projects.filter(p => p.id !== id);
+    persist();
+  }
+
+  function addMilestone(projectId, text) {
+    const project = state.projects.find(p => p.id === projectId);
+    const clean = String(text || '').trim();
+    if (!project || !clean) return null;
+    const milestone = { id: uid('pm'), text: clean, done: false };
+    project.milestones.push(milestone);
+    persist();
+    return milestone;
+  }
+
+  function toggleMilestone(projectId, milestoneId) {
+    const project = state.projects.find(p => p.id === projectId);
+    const milestone = project && project.milestones.find(m => m.id === milestoneId);
+    if (!milestone) return null;
+    milestone.done = !milestone.done;
+    persist();
+    return milestone;
+  }
+
+  function deleteMilestone(projectId, milestoneId) {
+    const project = state.projects.find(p => p.id === projectId);
+    if (!project) return;
+    project.milestones = project.milestones.filter(m => m.id !== milestoneId);
+    persist();
+  }
+
+  /* Claiming a topic was used here, with a sentence saying how. */
+  function linkConcept(projectId, nodeId, evidence = '') {
+    const project = state.projects.find(p => p.id === projectId);
+    if (!project || !byId(nodeId)) return null;
+
+    const existing = project.concepts.find(c => c.nodeId === nodeId);
+    if (existing) {
+      if (evidence) existing.evidence = String(evidence).trim();
+      persist();
+      return existing;
+    }
+    const concept = { nodeId: String(nodeId), evidence: String(evidence || '').trim() };
+    project.concepts.push(concept);
+    persist();
+    return concept;
+  }
+
+  function unlinkConcept(projectId, nodeId) {
+    const project = state.projects.find(p => p.id === projectId);
+    if (!project) return;
+    project.concepts = project.concepts.filter(c => c.nodeId !== nodeId);
+    persist();
+  }
+
+  /* Read from the topic's side: where has this actually been used? A parent
+     counts anything used by a topic beneath it. */
+  function projectsUsing(nodeId, includeDescendants = true) {
+    const ids = new Set([nodeId, ...(includeDescendants ? descendantsOf(nodeId).map(n => n.id) : [])]);
+    return state.projects
+      .filter(p => p.concepts.some(c => ids.has(c.nodeId)))
+      .map(p => ({
+        project: p,
+        evidence: p.concepts.filter(c => ids.has(c.nodeId)).map(c => c.evidence).filter(Boolean),
+      }));
+  }
+
   /* ---------------- job applications ---------------- */
 
   /* Applications are ALWAYS private. They are never written to the public
@@ -1300,6 +1572,10 @@ const Store = (() => {
           return (mapped ? priv.has(mapped) : false) === wantPrivate;
         })
         .sort((a, b) => a.solvedAt.localeCompare(b.solvedAt)),
+      /* A project follows its own private flag, like a branch does. */
+      projects: state.projects.filter(p => !!p.private === wantPrivate),
+      /* Goals are public: they are about learning, not about anyone. */
+      goals: wantPrivate ? [] : state.goals,
       /* A journal entry follows the topic it was written against. */
       journal: state.journal.filter(e => priv.has(e.nodeId) === wantPrivate),
       /* A reference is only public when both ends are. */
@@ -1311,24 +1587,26 @@ const Store = (() => {
   }
 
   function toJSON() {
-    const { nodes, sessions, focus, problems, links, journal } = partition(false);
+    const { nodes, sessions, focus, problems, links, journal, goals, projects } = partition(false);
     return JSON.stringify({
       version: state.version, updatedAt: state.updatedAt, profile: state.profile,
-      nodes, links, sessions, focus, problems, journal,
+      nodes, links, sessions, focus, problems, journal, goals, projects,
       tagMap: state.tagMap, sources: state.sources,
     }, null, 2);
   }
 
   function toPrivateJSON() {
-    const { nodes, sessions, focus, problems, applications, links, journal } = partition(true);
+    const { nodes, sessions, focus, problems, applications, links, journal, projects } = partition(true);
     return JSON.stringify({
       version: state.version, updatedAt: state.updatedAt, private: true,
-      nodes, links, sessions, focus, problems, journal, applications,
+      nodes, links, sessions, focus, problems, journal, projects, applications,
     }, null, 2);
   }
 
   const hasPrivateData = () =>
-    state.nodes.some(n => isPrivate(n.id)) || state.applications.length > 0;
+    state.nodes.some(n => isPrivate(n.id)) ||
+    state.applications.length > 0 ||
+    state.projects.some(p => p.private);
 
   function importJSON(text) {
     const parsed = JSON.parse(text);
@@ -1356,6 +1634,8 @@ const Store = (() => {
     const haveApps     = new Set(state.applications.map(x => x.id));
     const haveLinks    = new Set(state.links.map(x => x.id));
     const haveJournal  = new Set(state.journal.map(x => x.id));
+    const haveGoals    = new Set(state.goals.map(x => x.id));
+    const haveProjects = new Set(state.projects.map(x => x.id));
 
     const merged = normalize({
       version:  state.version,
@@ -1367,6 +1647,8 @@ const Store = (() => {
       applications: [...state.applications, ...(parsed.applications || []).filter(x => !haveApps.has(String(x.id)))],
       links:    [...state.links, ...(parsed.links || []).filter(x => !haveLinks.has(String(x.id)))],
       journal:  [...state.journal, ...(parsed.journal || []).filter(x => !haveJournal.has(String(x.id)))],
+      goals:    [...state.goals, ...(parsed.goals || []).filter(x => !haveGoals.has(String(x.id)))],
+      projects: [...state.projects, ...(parsed.projects || []).filter(x => !haveProjects.has(String(x.id)))],
       tagMap:   { ...(parsed.tagMap || {}), ...state.tagMap },
       sources:  state.sources,
     });
@@ -1406,6 +1688,10 @@ const Store = (() => {
     addNode, updateNode, deleteNode, addSession, deleteSession, updateProfile,
     addItem, toggleItem, updateItem, deleteItem, checklistOf,
     addEntry, updateEntry, deleteEntry, journalFor, obsidianUrl,
+    PROJECT_STATES, projects, addProject, updateProject, deleteProject, projectProgress,
+    addMilestone, toggleMilestone, deleteMilestone, linkConcept, unlinkConcept, projectsUsing,
+    GOAL_TARGETS, goals, addGoal, updateGoal, deleteGoal,
+    addGoalPart, toggleGoalPart, deleteGoalPart, goalProgress, partProgress, daysRemaining,
     PROBLEM_SOURCES, LEVELS, INDEPENDENCE, PROBLEM_STATES, allSources, addSource, sourceLabel,
     problemsToRevisit, scheduleReview, markRevisited,
     addProblem, updateProblem, deleteProblem, deleteProblemsFrom, recordSolve, recordSolves,

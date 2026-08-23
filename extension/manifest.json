@@ -11,6 +11,7 @@
   "host_permissions": [
     "https://codeforces.com/*",
     "https://leetcode.com/*",
+    "https://projecteuler.net/*",
     "https://mobeenmohammed.github.io/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
@@ -28,6 +29,16 @@
       ],
       "js": [
         "bridge.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://projecteuler.net/*"
+      ],
+      "js": [
+        "euler.js",
+        "projecteuler.js"
       ],
       "run_at": "document_idle"
     }

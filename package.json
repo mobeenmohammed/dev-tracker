@@ -7,7 +7,7 @@
   "scripts": {
     "test": "npm run test:store && npm run test:extension && npm run test:browser",
     "test:store": "node tests/store.test.mjs",
-    "test:extension": "node tests/extension.test.mjs && node tests/leetcode.test.mjs",
+    "test:extension": "node tests/extension.test.mjs && node tests/leetcode.test.mjs && node tests/euler.test.mjs",
     "test:browser": "node tests/browser/app.test.mjs && node tests/browser/boot.test.mjs && node tests/browser/styles.test.mjs",
     "serve": "python -m http.server 8000"
   },

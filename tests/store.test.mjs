@@ -540,6 +540,110 @@ check('a bare domain works too', Store.parsePosting('jane-street.com/join/1').co
 check('nonsense is refused',  Store.parsePosting('not a url at all'), null);
 check('nothing is refused',   Store.parsePosting(''), null);
 
+/* --- goals: a few concrete things, by a date --- */
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'cpp', parentId: null, name: 'C++', status: 'learning' },
+    { id: 'gdb', parentId: 'cpp', name: 'gdb', status: 'planned',
+      items: [{ id: 'i1', text: 'breakpoints', done: true }, { id: 'i2', text: 'watchpoints', done: false }] },
+  ],
+  tagMap: { cpp: 'cpp' },
+}));
+
+const goal = Store.addGoal({ name: 'Comfortable with modern C++', targetDate: Store.shiftDays(Store.todayISO(), 38) });
+check('a goal needs a name',        Store.addGoal({ name: '  ' }), null);
+check('goal created',               Store.goals().length, 1);
+check('days remaining counted',     Store.daysRemaining(goal), 38);
+check('an empty goal is at zero',   Store.goalProgress(goal), { ratio: 0, done: 0, total: 0 });
+
+/* Parts the tracker can answer are answered by it. */
+const manual = Store.addGoalPart(goal.id, { kind: 'manual', text: 'Build one C++ project' });
+Store.addGoalPart(goal.id, { kind: 'status', nodeId: 'cpp', status: 'proficient', text: 'C++ proficient' });
+Store.addGoalPart(goal.id, { kind: 'checklist', nodeId: 'gdb', text: 'Learn gdb' });
+Store.addGoalPart(goal.id, { kind: 'problems', nodeId: 'cpp', amount: 4, text: '4 problems' });
+check('parts added', Store.goals()[0].parts.length, 4);
+
+check('a manual part starts unticked', Store.partProgress(Store.goals()[0].parts[0]), 0);
+check('a status part is not met yet',  Store.partProgress(Store.goals()[0].parts[1]), 0);
+check('a checklist part is half done', Store.partProgress(Store.goals()[0].parts[2]), 0.5);
+check('a problems part has nothing yet', Store.partProgress(Store.goals()[0].parts[3]), 0);
+
+Store.toggleGoalPart(goal.id, manual.id);
+check('ticking a manual part counts', Store.partProgress(Store.goals()[0].parts[0]), 1);
+
+/* Real work moves the goal without anyone updating the goal. */
+Store.updateNode('cpp', { status: 'proficient' });
+check('reaching the status completes that part', Store.partProgress(Store.goals()[0].parts[1]), 1);
+Store.recordSolve({ source: 'other', problemId: 'g1', title: 'One', tags: ['cpp'], solvedAt: Store.todayISO() });
+Store.recordSolve({ source: 'other', problemId: 'g2', title: 'Two', tags: ['cpp'], solvedAt: Store.todayISO() });
+check('solves feed the problems part', Store.partProgress(Store.goals()[0].parts[3]), 0.5);
+
+const progress = Store.goalProgress(Store.goals()[0]);
+check('the goal averages its parts', Math.round(progress.ratio * 100), 75);
+check('and counts finished parts',   progress.done, 2);
+
+Store.deleteGoalPart(goal.id, manual.id);
+check('a part can be removed', Store.goals()[0].parts.length, 3);
+
+/* A part pointing at a deleted topic becomes an ordinary checkbox. */
+Store.deleteNode('gdb');
+Store.importJSON(Store.toJSON());
+const orphaned = Store.goals()[0].parts.find(p => p.text === 'Learn gdb');
+check('an orphaned part survives',  !!orphaned, true);
+check('and becomes manual',         orphaned.kind, 'manual');
+
+Store.deleteGoal(goal.id);
+check('a goal can be deleted', Store.goals().length, 0);
+
+/* --- projects: what you have actually built --- */
+const project = Store.addProject({ name: 'Order Book', repo: 'https://github.com/me/order-book' });
+check('a project needs a name',  Store.addProject({ name: '' }), null);
+check('project created',         Store.projects().length, 1);
+check('no milestones, no progress', Store.projectProgress(project).ratio, 0);
+
+Store.addMilestone(project.id, 'Matching engine');
+const orderTypes = Store.addMilestone(project.id, 'Order types');
+check('milestones added',        Store.projects()[0].milestones.length, 2);
+check('a blank milestone is refused', Store.addMilestone(project.id, '  '), null);
+Store.toggleMilestone(project.id, orderTypes.id);
+check('progress follows milestones', Store.projectProgress(Store.projects()[0]).ratio, 0.5);
+Store.deleteMilestone(project.id, orderTypes.id);
+check('a milestone can be removed', Store.projects()[0].milestones.length, 1);
+
+/* The point of the section: evidence that a concept was used. */
+Store.linkConcept(project.id, 'cpp', 'the whole engine is C++');
+check('a concept is linked',     Store.projects()[0].concepts.length, 1);
+check('with its evidence',       Store.projects()[0].concepts[0].evidence, 'the whole engine is C++');
+Store.linkConcept(project.id, 'cpp', 'revised wording');
+check('re-linking updates rather than duplicates',
+      [Store.projects()[0].concepts.length, Store.projects()[0].concepts[0].evidence],
+      [1, 'revised wording']);
+check('a concept for a missing topic is refused', Store.linkConcept(project.id, 'nope', 'x'), null);
+
+const using = Store.projectsUsing('cpp');
+check('the topic knows where it was used', using.length, 1);
+check('and what was said about it',        using[0].evidence, ['revised wording']);
+check('an unrelated topic has none',       Store.projectsUsing('nope').length, 0);
+
+Store.unlinkConcept(project.id, 'cpp');
+check('a concept can be unlinked', Store.projectsUsing('cpp').length, 0);
+
+/* A private project stays out of the public snapshot. */
+Store.updateProject(project.id, { private: true });
+check('a private project is not published',
+      JSON.parse(Store.toJSON()).projects.length, 0);
+check('and is in the private file',
+      JSON.parse(Store.toPrivateJSON()).projects.length, 1);
+check('holding one counts as private data', Store.hasPrivateData(), true);
+Store.updateProject(project.id, { private: false });
+check('a public project is published', JSON.parse(Store.toJSON()).projects.length, 1);
+
+/* Goals are always public: they describe learning, not people. */
+Store.addGoal({ name: 'Public goal' });
+check('goals are never private', JSON.parse(Store.toJSON()).goals.length, 1);
+check('and absent from the private file entirely',
+      JSON.parse(Store.toPrivateJSON()).goals, undefined);
+
 /* --- a broken parent link re-roots instead of vanishing --- */
 Store.importJSON(JSON.stringify({
   nodes: [{ id: 'orphan', parentId: 'does-not-exist', name: 'Orphan' }],

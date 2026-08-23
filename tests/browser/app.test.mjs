@@ -32,11 +32,11 @@ window.prompt = () => 'Advent of Code';
 window.alert = msg => errors.push('alert(): ' + msg);
 window.matchMedia = () => ({ matches: false, addEventListener() {} });
 
-const bundle = ['js/store.js', 'js/tree.js', 'js/views.js', 'js/problems.js', 'js/applications.js', 'js/app.js']
+const bundle = ['js/store.js', 'js/tree.js', 'js/views.js', 'js/problems.js', 'js/projects.js', 'js/applications.js', 'js/app.js']
   .map(f => fs.readFileSync(path.join(ROOT, f), 'utf8'))
   .join(String.fromCharCode(10) + ';' + String.fromCharCode(10));
 window.eval(bundle + ';window.Store = Store; window.Tree = Tree; window.Views = Views;' +
-  'window.Problems = Problems; window.Applications = Applications;');
+  'window.Problems = Problems; window.Applications = Applications; window.Projects = Projects;');
 
 await new Promise(r => setTimeout(r, 300));
 
@@ -797,6 +797,89 @@ const openLink = $('.obsidian-row a');
 check('an open link appears', !!openLink);
 check('pointing at the vault', /^obsidian:\/\/open\?vault=My%20Vault/.test(openLink.getAttribute('href')),
       openLink && openLink.getAttribute('href'));
+
+/* ---------- 7i. goals ---------- */
+click($$('.tab-fixed').find(t => t.dataset.view === 'focus'));
+check('goals live with today', !!$('#goalList'));
+check('and start empty', /No goals yet/.test($('#goalList').textContent));
+
+const gForm = $('#goalForm');
+gForm.querySelector('[name="name"]').value = 'Comfortable with modern C++';
+gForm.querySelector('[name="targetDate"]').value = Store.shiftDays(Store.todayISO(), 30);
+gForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('goal created', Store.goals().length === 1);
+check('card rendered', $$('#goalList .goal-card').length === 1);
+check('days remaining shown', /30 days remaining/.test($('.goal-when').textContent), $('.goal-when').textContent);
+check('it opens straight away', !!$('.goal-parts'));
+
+// a part the tracker answers for itself
+const partForm = $('.goal-part-add');
+partForm.querySelector('[name="kind"]').value = 'status';
+fire(partForm.querySelector('[name="kind"]'), 'change');
+check('picking a topic is offered', !partForm.querySelector('[name="nodeId"]').hidden);
+check('and which status', !partForm.querySelector('[name="status"]').hidden);
+partForm.querySelector('[name="nodeId"]').value = 'cpp-cmake';
+partForm.querySelector('[name="status"]').value = 'proficient';
+partForm.querySelector('[name="text"]').value = 'CMake proficient';
+partForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('an automatic part is added', Store.goals()[0].parts.length === 1);
+check('it reports progress rather than a checkbox', !!$('.goal-part .part-auto'));
+check('and says where it comes from', /CMake/.test($('.part-source').textContent), $('.part-source')?.textContent);
+
+// doing the real work moves the goal
+Store.updateNode('cpp-cmake', { status: 'proficient' });
+window.Views.renderGoals();
+check('real progress reaches the goal', /100%/.test($('.goal-pct').textContent), $('.goal-pct').textContent);
+
+// a manual part still gets a checkbox
+const partForm2 = $('.goal-part-add');
+partForm2.querySelector('[name="kind"]').value = 'manual';
+fire(partForm2.querySelector('[name="kind"]'), 'change');
+check('a topic is not asked for', partForm2.querySelector('[name="nodeId"]').hidden);
+partForm2.querySelector('[name="text"]').value = 'Build one C++ project';
+partForm2.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('a manual part is added', Store.goals()[0].parts.length === 2);
+check('with a checkbox', $$('.goal-part .task-check').length === 1);
+click($('.goal-part .task-check'));
+check('ticking it counts', Store.goals()[0].parts[1].done === true);
+
+/* ---------- 7j. projects ---------- */
+click($$('.tab-fixed').find(t => t.dataset.view === 'projects'));
+check('projects view shown', !$('#view-projects').hidden);
+check('starts empty', !!$('#projectList .list-empty'));
+
+const pjForm = $('#projectForm');
+pjForm.querySelector('[name="name"]').value = 'Order Book';
+pjForm.querySelector('[name="repo"]').value = 'https://github.com/me/order-book';
+pjForm.querySelector('[name="startedAt"]').value = Store.todayISO();
+pjForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('project created', Store.projects().length === 1);
+check('row rendered', $$('#projectList .project-row').length === 1);
+check('it opens for editing', !!$('.project-detail'));
+
+// milestones drive its progress
+const msForm = $('.prj-add');
+msForm.querySelector('[name="text"]').value = 'Matching engine';
+msForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('milestone added', Store.projects()[0].milestones.length === 1);
+click($('.prj-milestones .task-check'));
+check('progress follows milestones', Store.projectProgress(Store.projects()[0]).ratio === 1);
+check('and shows on the row', /100%/.test($('.pr-pct').textContent));
+
+// the part that matters: evidence a concept was used
+const cForm = $('.prj-concept-add');
+cForm.querySelector('[name="nodeId"]').value = 'cpp';
+cForm.querySelector('[name="evidence"]').value = 'the whole engine is C++';
+cForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('concept linked', Store.projects()[0].concepts.length === 1);
+check('shown with its evidence', /whole engine/.test($('.concept-evidence').textContent));
+
+// and the topic can see it from its own side
+click(tabNamed('All'));
+clickNode('C++');
+check('the topic says where it was used', !!$('.evidence-built'));
+check('naming the project', /Order Book/.test($('.evidence-built').textContent),
+      $('.evidence-built')?.textContent);
 
 /* ---------- 8. stats still fine ---------- */
 click($$('.tab-fixed').find(t => t.dataset.view === 'stats'));

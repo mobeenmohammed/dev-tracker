@@ -22,7 +22,10 @@ with **Focus**, **List** and **Stats** always pinned on the right.
   solves become evidence in the tree.
 - **Applications** — a private pipeline for job and internship applications,
   with a stage timeline per application and what needs chasing next.
-- **Focus** — a checklist for today: what you intend to work on, ticked off as
+- **Projects** — the things you have built, and which concepts each one is
+  evidence for. Studying CI/CD and having CI run on every push are different
+  claims; this is where the second one lives.
+- **Focus** — goals with a target date, and a checklist for today: what you intend to work on, ticked off as
   you go. Every past day is kept, so it becomes a record of intentions rather
   than a list that resets. Unfinished work can be carried forward in one click.
 - **List** — every topic as a filterable, sortable, foldable list. Selecting a
@@ -134,6 +137,48 @@ status is yours to lower.
 There is no backend. The app keeps its working copy in `localStorage`, and
 `data/learning.json` is the versioned snapshot committed to the repo.
 
+### Goals
+
+A field is never finished — you do not complete Mathematics. A goal is the
+opposite: a few concrete things, by a date.
+
+```
+Comfortable with modern C++          30 days remaining      71%
+██████████████░░░░░░
+  ✓ Build one C++ project
+  ✓ C++ reaches Proficient           status
+ 50% gdb checklist                   3 of 6
+ 25% 4 problems in C++               1/4
+```
+
+A part is either something you tick off yourself, or something the tracker can
+answer: a topic reaching a status, a checklist finishing, N problems solved, or
+N hours logged. Those answer themselves as you work, so goal progress is never
+a second thing to keep up to date.
+
+If a goal points at a topic you later delete, the part becomes an ordinary
+checkbox rather than disappearing — the intention was real.
+
+### Projects
+
+Concepts say what you have studied; problems say what you have practised. A
+project says what you have **built**, and which concepts it demonstrates:
+
+```
+Order Book            ████████████████░░  82%   Building   3 concepts
+   C++          the matching engine
+   Testing      74 tests
+   CI/CD        GitHub Actions on every push
+```
+
+Each project keeps a state, repository, technologies, milestones that drive its
+progress, and a set of linked concepts with a sentence saying how each was
+used. Open a linked topic and its inspector shows **Used in** — so the tree can
+now distinguish a topic you read about from one you shipped something with.
+
+A project can be marked private, in which case it goes to `data/private.json`
+like a private branch.
+
 ### Journal and Obsidian
 
 Each topic takes short dated notes — somewhere to put *"finally understood why
@@ -223,6 +268,14 @@ key**, so nothing is scraped and a redesign cannot break the sync:
 | --- | --- | --- |
 | Codeforces | `user.status` | Everything, back to your first submission |
 | LeetCode | GraphQL `recentAcSubmissionList` | Only a rolling window of your 20 most recent |
+| Project Euler | none — a button on the page | Whatever you log, from when you install it |
+
+Project Euler cannot be polled at all: it has no API and solved status exists
+only behind your login. Rather than guess at page structure that cannot be
+verified, the extension puts a **Log problem N** button on every problem page.
+It reads the number from the URL, which is stable, so a redesign costs you a
+click rather than your data. If the page happens to say your answer was
+correct, the button says so too — but it never acts on its own.
 
 **What the LeetCode window means.** Each call returns the twenty most recent
 accepted submissions *as of that moment* — asking for fifty still returns
@@ -409,6 +462,7 @@ drive the page in tests.
 | `tests/browser/styles.test.mjs` | That nothing marked `hidden` is still displayed — a real bug once left an invisible overlay covering the canvas. |
 | `tests/extension.test.mjs` | Mapping Codeforces submissions to solves: verdict filtering, one entry per problem, incremental syncing, and the fields the API omits. |
 | `tests/leetcode.test.mjs` | Mapping LeetCode submissions to solves: the rolling window, string timestamps, enrichment from the question lookup, and errors returned inside a 200 response. |
+| `tests/euler.test.mjs` | Reading a Project Euler problem page: the number from the URL, and the fallbacks the title degrades through when markup changes. |
 
 
 
@@ -420,7 +474,7 @@ drive the page in tests.
 | `Enter` (in search) | Jump to the first match |
 | `n` | Add a sub-topic under the selection (or the field in focus) |
 | `N` | Start a new field |
-| `t` `d` `p` `a` `l` `s` | Tree / Focus / Problems / Applications / List / Stats |
+| `t` `d` `p` `j` `a` `l` `s` | Tree / Focus / Problems / Projects / Applications / List / Stats |
 | `f` | Fit the tree to the screen |
 | `Esc` | Clear the selection |
 
@@ -433,6 +487,7 @@ js/store.js           data model, persistence, derived metrics
 js/tree.js            card layout, SVG rendering, pan and zoom
 js/views.js           inspector, focus, list and stats views
 js/problems.js        the Problems view and solve import
+js/projects.js        the Projects view and concept evidence
 js/applications.js    the Applications view (private data)
 js/app.js             bootstrap, view switching, import/export, shortcuts
 data/learning.json    the committed snapshot

@@ -404,7 +404,8 @@ const Views = (() => {
   function inspEvidence(node) {
     const evidence = Store.evidenceFor(node.id);
     const suggestion = Store.suggestedStatus(node.id);
-    if (!evidence.solved && !suggestion) return null;
+    const usedIn = Store.projectsUsing(node.id);
+    if (!evidence.solved && !suggestion && !usedIn.length) return null;
 
     const sec = section('Evidence');
 
@@ -437,6 +438,20 @@ const Views = (() => {
           <span class="er-when">${esc(Store.relativeDay(p.solvedAt))}</span>
         </div>`).join('');
       sec.appendChild(recent);
+    }
+
+    /* Where the topic has actually been used, which is a stronger claim than
+       anything the problem log can make. */
+    const used = Store.projectsUsing(node.id);
+    if (used.length) {
+      const built = document.createElement('div');
+      built.className = 'evidence-built';
+      built.innerHTML = `<span class="field-label">Used in</span>` + used.map(({ project, evidence }) => `
+        <div class="built-row">
+          <strong>${esc(project.name)}</strong>
+          <span>${esc(evidence.join(' · '))}</span>
+        </div>`).join('');
+      sec.appendChild(built);
     }
 
     /* The status stays the person's to set; the evidence just makes a case. */
@@ -1078,6 +1093,7 @@ const Views = (() => {
   }
 
   function renderFocus() {
+    renderGoals();
     const today = Store.todayISO();
     const summary = Store.focusSummary(today);
 
@@ -1243,6 +1259,178 @@ const Views = (() => {
     return true;
   }
 
+
+  /* ---------------- goals ---------------- */
+
+  /* A field is never finished; a goal is. This is where a temporary, dated
+     target lives, with its parts answered by the tracker where they can be, so
+     progress is not a second thing to keep up to date. */
+  const openGoals = new Set();
+
+  function renderGoals() {
+    const box = document.getElementById('goalList');
+    const list = Store.goals();
+    box.replaceChildren();
+
+    if (!list.length) {
+      box.innerHTML = '<p class="focus-empty">No goals yet. A goal is a few concrete things by a date — ' +
+        'useful when a field on its own is too open-ended to aim at.</p>';
+      return;
+    }
+    list.forEach(goal => box.appendChild(goalCard(goal)));
+  }
+
+  function goalCard(goal) {
+    const card = document.createElement('div');
+    card.className = 'goal-card';
+
+    const progress = Store.goalProgress(goal);
+    const days = Store.daysRemaining(goal);
+    const open = openGoals.has(goal.id);
+    const late = days !== null && days < 0;
+
+    const when = days === null ? 'no date'
+      : late ? `${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} overdue`
+      : days === 0 ? 'due today'
+      : `${days} day${days === 1 ? '' : 's'} remaining`;
+
+    card.innerHTML = `
+      <div class="goal-head">
+        <span class="chev ${open ? '' : 'is-collapsed'}">&#9660;</span>
+        <strong class="goal-name">${esc(goal.name)}</strong>
+        <span class="goal-when ${late ? 'is-late' : ''}">${esc(when)}</span>
+        <span class="goal-pct">${Math.round(progress.ratio * 100)}%</span>
+      </div>
+      <div class="goal-bar"><i style="width:${Math.round(progress.ratio * 100)}%"></i></div>
+      <div class="goal-sub muted">${progress.done} of ${progress.total} complete</div>`;
+
+    card.querySelector('.goal-head').addEventListener('click', () => {
+      open ? openGoals.delete(goal.id) : openGoals.add(goal.id);
+      renderGoals();
+    });
+
+    if (open) card.appendChild(goalParts(goal));
+    return card;
+  }
+
+  function describePart(part, node) {
+    if (part.kind === 'status')    return `${node.name} reaches ${Store.STATUS_BY_ID[part.status].label}`;
+    if (part.kind === 'checklist') return `${node.name} checklist`;
+    if (part.kind === 'problems')  return `${Store.problemsForNode(node.id).length}/${part.amount} problems`;
+    if (part.kind === 'sessions')  return `${Math.round(Store.minutesFor(node.id, true) / 60)}/${part.amount} hours`;
+    return node.name;
+  }
+
+  function goalParts(goal) {
+    const wrap = document.createElement('div');
+    wrap.className = 'goal-parts';
+
+    goal.parts.forEach(part => {
+      const value = Store.partProgress(part);
+      const complete = value >= 1;
+      const node = part.nodeId ? Store.byId(part.nodeId) : null;
+      /* Only a part nobody else can answer gets a checkbox; the rest report
+         what the tracker already knows. */
+      const auto = part.kind !== 'manual' && node;
+
+      const row = document.createElement('div');
+      row.className = 'goal-part' + (complete ? ' is-done' : '');
+      row.innerHTML = `
+        ${auto
+          ? `<span class="part-auto" title="Answered by the tracker">${complete ? '&#10003;' : Math.round(value * 100) + '%'}</span>`
+          : `<button class="task-check" aria-pressed="${part.done}">&#10003;</button>`}
+        <span class="part-text"></span>
+        ${auto ? `<span class="part-source">${esc(describePart(part, node))}</span>` : ''}
+        <button class="task-del" title="Remove this part" aria-label="Remove part">&times;</button>`;
+
+      row.querySelector('.part-text').textContent = part.text || (node ? node.name : 'Untitled');
+
+      const check = row.querySelector('.task-check');
+      if (check) check.addEventListener('click', () => {
+        Store.toggleGoalPart(goal.id, part.id);
+        onChanged();
+      });
+      row.querySelector('.task-del').addEventListener('click', () => {
+        Store.deleteGoalPart(goal.id, part.id);
+        onChanged();
+      });
+      wrap.appendChild(row);
+    });
+
+    wrap.appendChild(goalPartForm(goal));
+
+    const actions = document.createElement('div');
+    actions.className = 'goal-actions';
+    const remove = document.createElement('button');
+    remove.className = 'btn btn-sm danger';
+    remove.textContent = 'Delete goal';
+    remove.addEventListener('click', () => {
+      if (!confirm(`Delete the goal "${goal.name}"?`)) return;
+      Store.deleteGoal(goal.id);
+      onChanged();
+    });
+    actions.appendChild(remove);
+    wrap.appendChild(actions);
+    return wrap;
+  }
+
+  function goalPartForm(goal) {
+    const form = document.createElement('form');
+    form.className = 'goal-part-add';
+    form.innerHTML = `
+      <select name="kind" aria-label="What kind of part">
+        ${Store.GOAL_TARGETS.map(t => `<option value="${t.id}">${t.label}</option>`).join('')}
+      </select>
+      <input type="text" name="text" placeholder="What has to happen" aria-label="Part">
+      <select name="nodeId" aria-label="Topic" hidden>
+        <option value="">Pick a topic…</option>
+        ${Store.state.nodes.map(n =>
+          `<option value="${esc(n.id)}">${'\u00a0\u00a0'.repeat(Store.depthOf(n.id))}${esc(n.name)}</option>`).join('')}
+      </select>
+      <select name="status" aria-label="Status to reach" hidden>
+        ${Store.STATUSES.map(st => `<option value="${st.id}" ${st.id === 'proficient' ? 'selected' : ''}>${st.label}</option>`).join('')}
+      </select>
+      <input type="number" name="amount" min="1" step="1" placeholder="How many" aria-label="How many" hidden>
+      <button class="btn btn-sm" type="submit">Add</button>`;
+
+    /* Only the fields a given kind actually needs are shown. */
+    const sync = () => {
+      const kind = form.querySelector('[name="kind"]').value;
+      form.querySelector('[name="nodeId"]').hidden = kind === 'manual';
+      form.querySelector('[name="status"]').hidden = kind !== 'status';
+      form.querySelector('[name="amount"]').hidden = !['problems', 'sessions'].includes(kind);
+      form.querySelector('[name="text"]').placeholder =
+        kind === 'manual' ? 'What has to happen' : 'Label (optional)';
+    };
+    form.querySelector('[name="kind"]').addEventListener('change', sync);
+    sync();
+
+    form.addEventListener('submit', ev => {
+      ev.preventDefault();
+      const data = new FormData(form);
+      const added = Store.addGoalPart(goal.id, {
+        kind: data.get('kind'),
+        text: data.get('text'),
+        nodeId: data.get('nodeId') || null,
+        status: data.get('status'),
+        amount: data.get('amount'),
+      });
+      if (added) onChanged();
+    });
+    return form;
+  }
+
+  function submitGoal() {
+    const form = document.getElementById('goalForm');
+    const data = new FormData(form);
+    const goal = Store.addGoal({ name: data.get('name'), targetDate: data.get('targetDate') });
+    if (!goal) return false;
+    openGoals.add(goal.id);
+    form.reset();
+    onChanged();
+    return true;
+  }
+
   /* ---------------- legend ---------------- */
 
   function renderLegend() {
@@ -1265,6 +1453,7 @@ const Views = (() => {
   return {
     init, renderInspector, renderList, renderStats, renderLegend, renderFocus,
     fillListFilters, collapseAllGroups, submitFocusTask, formatHours,
+    renderGoals, submitGoal,
     setListSelection(id) { listSelectedId = id; },
   };
 })();

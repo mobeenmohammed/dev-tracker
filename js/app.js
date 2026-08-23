@@ -15,7 +15,7 @@
   let showRefs = true;
   let inspectorWidth = 340;   // px, dragged by the divider and remembered
 
-  const VIEWS = ['tree', 'focus', 'problems', 'apps', 'list', 'stats'];
+  const VIEWS = ['tree', 'focus', 'problems', 'projects', 'apps', 'list', 'stats'];
 
   const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -135,6 +135,7 @@
     if (currentView === 'focus') Views.renderFocus();
     if (currentView === 'problems') { Problems.fillForm(); Problems.render(); }
     if (currentView === 'apps') { Applications.fillForm(); Applications.render(); }
+    if (currentView === 'projects') { Projects.fillForm(); Projects.render(); }
   }
 
   function showView(view) {
@@ -146,6 +147,7 @@
     if (view === 'focus') Views.renderFocus();
     if (view === 'problems') { Problems.fillForm(); Problems.render(); }
     if (view === 'apps') { Applications.fillForm(); Applications.render(); }
+    if (view === 'projects') { Projects.fillForm(); Projects.render(); }
     if (view === 'tree')  requestAnimationFrame(() => Tree.fit());
     persistUi();
   }
@@ -469,6 +471,8 @@
         openFixedView('problems');
       } else if (ev.key === 'a') {
         openFixedView('apps');
+      } else if (ev.key === 'j') {
+        openFixedView('projects');
       } else if (ev.key === 'l') {
         openFixedView('list');
       } else if (ev.key === 's') {
@@ -653,6 +657,11 @@
       Views.submitFocusTask();
     });
 
+    document.getElementById('goalForm').addEventListener('submit', ev => {
+      ev.preventDefault();
+      Views.submitGoal();
+    });
+
     Problems.init({
       onNotice: toast,
       onNavigate: id => {
@@ -667,6 +676,23 @@
     });
 
     Applications.init({ onChanged: refresh });
+
+    Projects.init({
+      onChanged: refresh,
+      onNavigate: id => {
+        const field = Store.domainOf(id);
+        if (field && activeField) activeField = field.id;
+        Tree.setRoot(activeField);
+        showView('tree');
+        renderTabs();
+        selectNode(id, { center: true });
+      },
+    });
+
+    document.getElementById('projectForm').addEventListener('submit', ev => {
+      ev.preventDefault();
+      Projects.submitProject();
+    });
 
     document.getElementById('problemForm').addEventListener('submit', ev => {
       ev.preventDefault();

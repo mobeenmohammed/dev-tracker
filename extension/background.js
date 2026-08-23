@@ -239,6 +239,25 @@ chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
         respond(await sync({ manual: true, backfill: true }));
         break;
 
+      /* Project Euler cannot be polled, so its page hands solves in directly. */
+      case 'log-solve': {
+        const solve = msg.solve;
+        if (!solve || !solve.problemId) { respond({ ok: false }); break; }
+
+        const settings = await readSettings();
+        const key = solve.source + ':' + solve.problemId;
+        const already = settings.queue.some(s => s.source + ':' + s.problemId === key);
+
+        if (!already) {
+          const queue = [...settings.queue, solve];
+          await writeSettings({ queue });
+          await updateBadge(queue.length);
+          await notifySolves([solve]);
+        }
+        respond({ ok: true, already });
+        break;
+      }
+
       case 'get-state':
         respond(await readSettings());
         break;
