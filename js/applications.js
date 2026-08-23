@@ -52,11 +52,116 @@ const Applications = (() => {
     return el;
   }
 
+  let view = 'board';      // 'board' | 'flow'
+
   function render() {
     wireLogoToggle();
+    wireViewToggle();
     renderStats();
     renderDue();
-    renderBoard();
+
+    document.getElementById('appBoard').hidden = view !== 'board';
+    document.getElementById('appFlow').hidden = view !== 'flow';
+    view === 'flow' ? renderFlow() : renderBoard();
+  }
+
+  function wireViewToggle() {
+    document.querySelectorAll('[data-app-view]').forEach(btn => {
+      btn.classList.toggle('is-on', btn.dataset.appView === view);
+      if (btn.dataset.wired) return;
+      btn.dataset.wired = '1';
+      btn.addEventListener('click', () => {
+        view = btn.dataset.appView;
+        render();
+      });
+    });
+  }
+
+  /* A pipeline read as flows rather than a table: each band is a stage, each
+     ribbon an application moving between them. Easier to take in than counts,
+     and it makes where things stop obvious. */
+  function renderFlow() {
+    const box = document.getElementById('appFlow');
+    const { stages, flows, total } = Store.applicationFlow();
+    box.replaceChildren();
+
+    if (!total) {
+      box.innerHTML = '<p class="muted list-empty">Nothing to chart yet.</p>';
+      return;
+    }
+
+    const WIDTH = 720, ROW = 78, PAD = 26;
+    const height = stages.length * ROW + PAD;
+    const max = Math.max(...stages.map(s => s.count), 1);
+    const barWidth = count => Math.max(28, (count / max) * (WIDTH - 200));
+
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${WIDTH} ${height}`);
+    svg.setAttribute('class', 'flow-chart');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Applications by stage');
+
+    const y = {};
+    stages.forEach((stage, i) => { y[stage.id] = PAD / 2 + i * ROW; });
+
+    /* Ribbons first, so the bands sit on top of them. */
+    flows.forEach(flow => {
+      if (y[flow.from] === undefined || y[flow.to] === undefined) return;
+
+      const fromStage = stages.find(s => s.id === flow.from);
+      const y1 = y[flow.from] + 26;
+      const y2 = y[flow.to];
+      const mid = (y1 + y2) / 2;
+      const x1 = 150 + barWidth(fromStage.count) * 0.35;
+      const x2 = 150 + barWidth(stages.find(s => s.id === flow.to).count) * 0.35;
+      const thickness = Math.max(3, (flow.count / max) * 34);
+
+      const path = document.createElementNS(svgNS, 'path');
+      path.setAttribute('d', `M${x1},${y1}C${x1},${mid} ${x2},${mid} ${x2},${y2}`);
+      path.setAttribute('class', 'flow-ribbon');
+      path.setAttribute('stroke-width', thickness);
+      path.appendChild(titleFor(svgNS,
+        `${Store.STAGE_BY_ID[flow.from].label} to ${Store.STAGE_BY_ID[flow.to].label}: ${flow.count}`));
+      svg.appendChild(path);
+    });
+
+    stages.forEach(stage => {
+      const width = barWidth(stage.count);
+
+      const bar = document.createElementNS(svgNS, 'rect');
+      bar.setAttribute('x', 150);
+      bar.setAttribute('y', y[stage.id]);
+      bar.setAttribute('width', width);
+      bar.setAttribute('height', 26);
+      bar.setAttribute('rx', 5);
+      bar.setAttribute('class', `flow-bar flow-${stage.id}`);
+      bar.appendChild(titleFor(svgNS, `${stage.label}: ${stage.count}`));
+      svg.appendChild(bar);
+
+      const label = document.createElementNS(svgNS, 'text');
+      label.setAttribute('x', 140);
+      label.setAttribute('y', y[stage.id] + 18);
+      label.setAttribute('text-anchor', 'end');
+      label.setAttribute('class', 'flow-label');
+      label.textContent = stage.label;
+      svg.appendChild(label);
+
+      const count = document.createElementNS(svgNS, 'text');
+      count.setAttribute('x', 158 + width);
+      count.setAttribute('y', y[stage.id] + 18);
+      count.setAttribute('class', 'flow-count');
+      count.textContent = stage.count;
+      svg.appendChild(count);
+    });
+
+    box.appendChild(svg);
+  }
+
+  function titleFor(ns, text) {
+    const title = document.createElementNS(ns, 'title');
+    title.textContent = text;
+    return title;
   }
 
   function renderStats() {

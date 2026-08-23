@@ -972,7 +972,7 @@ const Views = (() => {
         <div class="sub">${esc(c.sub)}</div>
       </div>`).join('');
 
-    renderHeatmap(sessions);
+    renderHeatmap();
     renderDomainProgress();
     renderRecentSolves();
     renderRecentSessions(sessions);
@@ -1003,27 +1003,137 @@ const Views = (() => {
     }).join('');
   }
 
-  function renderHeatmap(sessions) {
-    const byDay = new Map();
-    sessions.forEach(s => byDay.set(s.date, (byDay.get(s.date) || 0) + s.minutes));
+  let openDay = null;
 
+  /* The grid is a way into the history, not just a picture of it: every square
+     says what that day held, and opening one shows the day itself. */
+  function renderHeatmap() {
     /* Start on the Sunday of the week containing (today - 26 weeks), so the
        grid lines up in clean week columns. */
     const today = Store.todayISO();
     let start = Store.shiftDays(today, -HEATMAP_WEEKS * 7);
     start = Store.shiftDays(start, -Store.dayOfWeek(start));
 
-    const cells = [];
+    const grid = document.getElementById('heatmap');
+    grid.replaceChildren();
 
     for (let i = 0; i < HEATMAP_WEEKS * 7 + 7; i++) {
       const iso = Store.shiftDays(start, i);
-      const mins = byDay.get(iso) || 0;
-
-      const level = mins === 0 ? 0 : mins < 30 ? 1 : mins < 60 ? 2 : mins < 120 ? 3 : 4;
       const future = iso > today;
-      cells.push(`<span class="hm-cell l${level}${future ? ' is-future' : ''}" title="${iso}: ${mins ? formatHours(mins) : 'nothing logged'}"></span>`);
+      const activity = future ? null : Store.activityOn(iso);
+      const level = activity ? Store.activityLevel(activity) : 0;
+
+      const cell = document.createElement('span');
+      cell.className = `hm-cell l${level}${future ? ' is-future' : ''}${iso === openDay ? ' is-open' : ''}`;
+      cell.dataset.date = iso;
+      cell.title = future ? iso : summariseDay(activity);
+
+      if (!future) {
+        cell.setAttribute('role', 'button');
+        cell.setAttribute('tabindex', '0');
+        cell.addEventListener('click', () => {
+          openDay = openDay === iso ? null : iso;
+          renderHeatmap();
+          renderDay();
+        });
+      }
+      grid.appendChild(cell);
     }
-    document.getElementById('heatmap').innerHTML = cells.join('');
+    renderDay();
+  }
+
+  /* What the hover says: the day, and everything counted on it. */
+  function summariseDay(activity) {
+    const parts = [];
+    if (activity.doneTasks.length) parts.push(`${activity.doneTasks.length} task${activity.doneTasks.length === 1 ? '' : 's'} completed`);
+    if (activity.solves.length)    parts.push(`${activity.solves.length} problem${activity.solves.length === 1 ? '' : 's'} solved`);
+    if (activity.minutes)          parts.push(`${formatHours(activity.minutes)} studied`);
+    if (activity.notes.length)     parts.push(`${activity.notes.length} note${activity.notes.length === 1 ? '' : 's'}`);
+    if (activity.applications.length) parts.push(`${activity.applications.length} application update${activity.applications.length === 1 ? '' : 's'}`);
+
+    const heading = `${formatFullDate(activity.date)} — ${activity.units || 'no'} ` +
+      `${activity.units === 1 ? 'activity' : 'activities'}`;
+    const newline = String.fromCharCode(10);
+    return parts.length ? heading + newline + parts.join(newline) : heading;
+  }
+
+  const formatFullDate = iso => {
+    const d = new Date(iso + 'T00:00:00');
+    return Number.isNaN(d.getTime()) ? iso
+      : d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  };
+
+  /* Opening a square shows the day itself, which is what turns a statistic
+     into somewhere you can look things up. */
+  function renderDay() {
+    const panel = document.getElementById('dayDetail');
+    if (!openDay) { panel.hidden = true; panel.replaceChildren(); return; }
+
+    const activity = Store.activityOn(openDay);
+    panel.hidden = false;
+    panel.replaceChildren();
+
+    const head = document.createElement('div');
+    head.className = 'day-detail-head';
+    head.innerHTML = `<h3>${esc(formatFullDate(openDay))}</h3>
+      <span class="muted">${activity.units || 'no'} ${activity.units === 1 ? 'activity' : 'activities'}</span>
+      <button class="btn btn-sm" id="closeDay">Close</button>`;
+    head.querySelector('#closeDay').addEventListener('click', () => {
+      openDay = null;
+      renderHeatmap();
+    });
+    panel.appendChild(head);
+
+    if (!activity.units) {
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = 'Nothing recorded on this day.';
+      panel.appendChild(empty);
+      return;
+    }
+
+    const group = (title, rows) => {
+      if (!rows.length) return;
+      const box = document.createElement('div');
+      box.className = 'day-group-block';
+      box.innerHTML = `<span class="field-label">${esc(title)}</span>`;
+      rows.forEach(row => box.appendChild(row));
+      panel.appendChild(box);
+    };
+
+    const line = (text, sub, onClick) => {
+      const row = document.createElement('div');
+      row.className = 'day-line' + (onClick ? ' is-clickable' : '');
+      row.innerHTML = `<span class="dl-text"></span><span class="dl-sub"></span>`;
+      row.querySelector('.dl-text').textContent = text;
+      row.querySelector('.dl-sub').textContent = sub || '';
+      if (onClick) row.addEventListener('click', onClick);
+      return row;
+    };
+
+    group('Tasks', activity.doneTasks.map(t => {
+      const node = t.nodeId ? Store.byId(t.nodeId) : null;
+      return line('✓ ' + t.text, node ? node.name : '', node ? () => onNavigate(t.nodeId) : null);
+    }));
+
+    group('Problems', activity.solves.map(p =>
+      line(p.title, `${Store.sourceLabel(p.source)}${p.level ? ' · ' + p.level : ''}`)));
+
+    group('Study', activity.sessions.map(s => {
+      const node = Store.byId(s.nodeId);
+      return line(`${s.minutes}m — ${node ? node.name : 'deleted topic'}`, s.note,
+                  node ? () => onNavigate(s.nodeId) : null);
+    }));
+
+    group('Notes', activity.notes.map(e => {
+      const node = Store.byId(e.nodeId);
+      return line(e.text, node ? node.name : '', node ? () => onNavigate(e.nodeId) : null);
+    }));
+
+    group('Applications', activity.applications.map(a => {
+      const event = a.events.find(e => e.date === openDay);
+      return line(a.company, `${a.role}${event ? ' · ' + event.stage : ''}`);
+    }));
   }
 
   function renderDomainProgress() {

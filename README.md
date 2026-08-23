@@ -31,8 +31,8 @@ with **Focus**, **List** and **Stats** always pinned on the right.
 - **List** — every topic as a filterable, sortable, foldable list. Selecting a
   row opens an inline editor for notes, a quick time log, and sub-topics,
   without leaving the list.
-- **Stats** — overall progress, a 26-week activity heatmap, a study streak,
-  per-field progress bars, and the recent session feed.
+- **Stats** — overall progress, a 26-week activity grid you can click into, a
+  study streak, per-field progress bars, and the recent session feed.
 
 ### The tree, and the graph
 
@@ -178,6 +178,28 @@ now distinguish a topic you read about from one you shipped something with.
 
 A project can be marked private, in which case it goes to `data/private.json`
 like a private branch.
+
+### Activity
+
+The grid on the Stats page counts **activity**, deliberately not
+"contributions" — borrowing GitHub's word would eventually get tracker work
+confused with git commits. A day's activity is everything recorded on it:
+completed tasks, problems solved, notes written, application updates, and
+whether any study time was logged.
+
+Hovering a square says what the day held; clicking it opens the day itself:
+
+```
+Sunday 23 August — 4 activities
+
+Tasks       ✓ Learn git reset                      Git & Version Control
+Problems    Reverse Linked List                    LeetCode · easy
+Study       40m — Git & Version Control            reset and reflog
+Notes       reflog saved me                        Git & Version Control
+```
+
+Anything tied to a topic is clickable and takes you there, so the grid is a way
+into your history rather than only a picture of it.
 
 ### Journal and Obsidian
 
@@ -345,7 +367,10 @@ The extension ships allowing `mobeenmohammed.github.io/dev-tracker/` and
 ### Applications
 
 A stage pipeline with a dated timeline per application, because the shape of a
-search is in its history rather than its current state.
+search is in its history rather than its current state. It reads either as a
+**list** grouped by stage, or as a **flow** — bands for each stage joined by
+ribbons showing how many applications moved between them, which makes where
+things stall obvious at a glance.
 
 Changing the stage records a dated event, but **correcting a mis-click leaves
 no trace**: a change made the same day, on top of an automatic event nobody has

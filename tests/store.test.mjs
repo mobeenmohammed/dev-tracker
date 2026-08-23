@@ -644,6 +644,98 @@ check('goals are never private', JSON.parse(Store.toJSON()).goals.length, 1);
 check('and absent from the private file entirely',
       JSON.parse(Store.toPrivateJSON()).goals, undefined);
 
+/* --- activity: what a day actually held --- */
+const busyDay = '2026-04-10';
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'git', parentId: null, name: 'Git' }],
+  sessions: [{ id: 's1', nodeId: 'git', date: busyDay, minutes: 40, note: 'reset and reflog' }],
+  focus: [
+    { id: 'f1', date: busyDay, text: 'Learn git reset', done: true, nodeId: 'git' },
+    { id: 'f2', date: busyDay, text: 'Unfinished thing', done: false },
+  ],
+  problems: [{ id: 'p1', source: 'leetcode', problemId: 'reverse-linked-list',
+               title: 'Reverse Linked List', solvedAt: busyDay }],
+  journal: [{ id: 'j1', nodeId: 'git', at: busyDay + 'T18:20:00.000Z', text: 'reflog saved me' }],
+  applications: [{ id: 'a1', company: 'Example', stage: 'applied',
+                   events: [{ id: 'e1', date: busyDay, stage: 'applied' }] }],
+}));
+
+const act = Store.activityOn(busyDay);
+check('study time counted',        act.minutes, 40);
+check('sessions listed',           act.sessions.length, 1);
+check('only completed tasks count', act.doneTasks.length, 1);
+check('but all are available',     act.tasks.length, 2);
+check('solves listed',             act.solves.length, 1);
+check('notes listed',              act.notes.length, 1);
+check('application events listed', act.applications.length, 1);
+
+/* One unit per thing done, with time counted once so a long day is not
+   flattened into a single square. */
+check('units add up',              act.units, 5);
+check('a busy day shades strongly',  Store.activityLevel(act), 3);
+/* Long study pushes it further, so a day of nothing but hours still shows. */
+check('hours deepen the shade',
+      Store.activityLevel({ units: 5, minutes: 180 }), 4);
+check('the scale tops out',
+      Store.activityLevel({ units: 40, minutes: 600 }), 4);
+
+const quiet = Store.activityOn('2026-04-11');
+check('an empty day has nothing',  quiet.units, 0);
+check('and no shade',              Store.activityLevel(quiet), 0);
+
+/* Time alone still registers. */
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'n', parentId: null, name: 'N' }],
+  sessions: [{ id: 's1', nodeId: 'n', date: busyDay, minutes: 20 }],
+}));
+check('study alone counts as a unit', Store.activityOn(busyDay).units, 1);
+check('and shades the square',        Store.activityLevel(Store.activityOn(busyDay)), 1);
+
+/* --- applications as flows, not just counts --- */
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'n', parentId: null, name: 'N' }],
+  applications: [
+    { id: 'a1', company: 'One', stage: 'rejected', events: [
+      { id: 'e1', date: '2026-01-01', stage: 'applied' },
+      { id: 'e2', date: '2026-01-10', stage: 'interview' },
+      { id: 'e3', date: '2026-01-20', stage: 'rejected' }] },
+    { id: 'a2', company: 'Two', stage: 'offer', events: [
+      { id: 'e4', date: '2026-01-02', stage: 'applied' },
+      { id: 'e5', date: '2026-01-12', stage: 'interview' },
+      { id: 'e6', date: '2026-01-22', stage: 'offer' }] },
+    { id: 'a3', company: 'Three', stage: 'applied', events: [
+      { id: 'e7', date: '2026-01-03', stage: 'applied' }] },
+  ],
+}));
+
+const flow = Store.applicationFlow();
+check('every application counted',   flow.total, 3);
+check('only reached stages appear',  flow.stages.map(s => s.id), ['applied', 'interview', 'offer', 'rejected']);
+check('applied counts all three',    flow.stages.find(s => s.id === 'applied').count, 3);
+check('interview counts two',        flow.stages.find(s => s.id === 'interview').count, 2);
+
+check('the common path is widest',   flow.flows[0], { from: 'applied', to: 'interview', count: 2 });
+check('outcomes are separate flows',
+      flow.flows.filter(f => f.from === 'interview').map(f => f.to).sort(), ['offer', 'rejected']);
+check('an application that never moved adds no flow',
+      flow.flows.some(f => f.from === 'applied' && f.to === 'applied'), false);
+
+/* Stages are ordered by the pipeline, not by when events were written. */
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'n', parentId: null, name: 'N' }],
+  applications: [{ id: 'a', company: 'Backwards', stage: 'offer', events: [
+    { id: 'e1', date: '2026-02-03', stage: 'offer' },
+    { id: 'e2', date: '2026-02-01', stage: 'applied' }] }],
+}));
+check('a path follows the pipeline order',
+      Store.applicationFlow().flows, [{ from: 'applied', to: 'offer', count: 1 }]);
+
+check('no applications, no chart', (() => {
+  Store.importJSON(JSON.stringify({ nodes: [{ id: 'n', parentId: null, name: 'N' }] }));
+  const empty = Store.applicationFlow();
+  return [empty.total, empty.stages.length, empty.flows.length];
+})(), [0, 0, 0]);
+
 /* --- a broken parent link re-roots instead of vanishing --- */
 Store.importJSON(JSON.stringify({
   nodes: [{ id: 'orphan', parentId: 'does-not-exist', name: 'Orphan' }],

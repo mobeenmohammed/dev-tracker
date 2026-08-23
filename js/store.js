@@ -499,6 +499,49 @@ const Store = (() => {
     persist();
   }
 
+  /* ---------------- activity ---------------- */
+
+  /* Deliberately not called contributions: this counts work units of the
+     tracker's own — study time, tasks, solves, notes, applications — and
+     borrowing GitHub's word would eventually get them confused with commits.
+
+     Everything a day contains, so the heatmap can be a way into the history
+     rather than only a picture of it. */
+  function activityOn(date) {
+    const sessions = state.sessions.filter(s => s.date === date);
+    const tasks    = state.focus.filter(t => t.date === date);
+    const solves   = state.problems.filter(p => p.solvedAt === date);
+    const notes    = state.journal.filter(e => String(e.at).slice(0, 10) === date);
+    const applied  = state.applications.filter(a => a.events.some(e => e.date === date));
+
+    const minutes = sessions.reduce((sum, s) => sum + s.minutes, 0);
+    const doneTasks = tasks.filter(t => t.done);
+
+    return {
+      date,
+      minutes,
+      sessions,
+      tasks,
+      doneTasks,
+      solves,
+      notes,
+      applications: applied,
+      /* One unit per thing done, with time counted separately so a long day
+         of study is not flattened to a single square. */
+      units: doneTasks.length + solves.length + notes.length + applied.length + (minutes > 0 ? 1 : 0),
+    };
+  }
+
+  /* A day's intensity, which is what the square's shade shows. */
+  function activityLevel(activity) {
+    const score = activity.units + Math.floor(activity.minutes / 45);
+    if (!score) return 0;
+    if (score <= 1) return 1;
+    if (score <= 3) return 2;
+    if (score <= 5) return 3;
+    return 4;
+  }
+
   /* ---------------- journal ---------------- */
 
   /* Short, dated notes against a topic. Not a replacement for a real notes
@@ -1524,6 +1567,41 @@ const Store = (() => {
     return { company: titleCase(name), source: 'Company site', domain: host };
   }
 
+  /* Where applications actually went, as flows between stages rather than a
+     table of counts. Each application contributes one path through the stages
+     it reached, in the order it reached them, which is what makes the shape of
+     a search visible at a glance. */
+  function applicationFlow() {
+    const order = APP_STAGES.map(s => s.id);
+    const flows = new Map();
+    const totals = new Map();
+
+    state.applications.forEach(app => {
+      /* The timeline is the truth; the current stage catches anything that
+         never generated an event. */
+      const seen = [...new Set(app.events.map(e => e.stage))]
+        .sort((a, b) => order.indexOf(a) - order.indexOf(b));
+      if (!seen.includes(app.stage)) seen.push(app.stage);
+
+      seen.forEach(stage => totals.set(stage, (totals.get(stage) || 0) + 1));
+
+      for (let i = 0; i < seen.length - 1; i++) {
+        const key = seen[i] + '>' + seen[i + 1];
+        flows.set(key, (flows.get(key) || 0) + 1);
+      }
+    });
+
+    return {
+      stages: order
+        .map(id => ({ id, label: STAGE_BY_ID[id].label, count: totals.get(id) || 0 }))
+        .filter(s => s.count > 0),
+      flows: [...flows.entries()]
+        .map(([key, count]) => ({ from: key.split('>')[0], to: key.split('>')[1], count }))
+        .sort((a, b) => b.count - a.count),
+      total: state.applications.length,
+    };
+  }
+
   function applicationStats() {
     const all = state.applications;
     const inStage = id => all.filter(a => a.stage === id).length;
@@ -1688,6 +1766,7 @@ const Store = (() => {
     addNode, updateNode, deleteNode, addSession, deleteSession, updateProfile,
     addItem, toggleItem, updateItem, deleteItem, checklistOf,
     addEntry, updateEntry, deleteEntry, journalFor, obsidianUrl,
+    activityOn, activityLevel,
     PROJECT_STATES, projects, addProject, updateProject, deleteProject, projectProgress,
     addMilestone, toggleMilestone, deleteMilestone, linkConcept, unlinkConcept, projectsUsing,
     GOAL_TARGETS, goals, addGoal, updateGoal, deleteGoal,
@@ -1702,7 +1781,7 @@ const Store = (() => {
     addLink, updateLink, deleteLink, linksFor, relatedTo, LINK_TYPES, prerequisiteWarnings,
     TAG_CATALOGUE, catalogueTags, knownTags,
     APP_STAGES, STAGE_BY_ID, applications, addApplication, updateApplication,
-    deleteApplication, addApplicationEvent, deleteApplicationEvent, applicationStats,
+    deleteApplication, addApplicationEvent, deleteApplicationEvent, applicationStats, applicationFlow,
     parsePosting,
     toJSON, toPrivateJSON, hasPrivateData, importJSON, mergeJSON, adoptSeed, resetToSeed,
     todayISO, shiftDays, dayOfWeek, uid,

@@ -697,6 +697,25 @@ check('and the stage is back', Store.applications().find(a => a.company === 'Exa
 Store.deleteApplication(fromUrl.id);
 window.Applications.render();
 
+// the same pipeline, drawn as flows. A ribbon needs an application that
+// actually moved, so give one a real progression first.
+const moved = Store.addApplication({ company: 'Moved On', stage: 'applied' });
+Store.addApplicationEvent(moved.id, { date: Store.todayISO(), stage: 'interview', note: 'phone screen' });
+Store.updateApplication(moved.id, { stage: 'interview' });
+window.Applications.render();
+
+click($$('[data-app-view]').find(b => b.dataset.appView === 'flow'));
+check('the flow view opens', !$('#appFlow').hidden && $('#appBoard').hidden);
+check('a chart is drawn', !!$('#appFlow .flow-chart'));
+check('with a band per reached stage', $$('#appFlow .flow-bar').length > 0);
+check('each band is labelled', $$('#appFlow .flow-label').length === $$('#appFlow .flow-bar').length);
+check('and carries a hover title', !!$('#appFlow .flow-bar title'));
+check('ribbons join the stages', $$('#appFlow .flow-ribbon').length > 0);
+click($$('[data-app-view]').find(b => b.dataset.appView === 'board'));
+check('and the list comes back', !$('#appBoard').hidden && $('#appFlow').hidden);
+Store.deleteApplication(moved.id);
+window.Applications.render();
+
 // THE guarantee
 const publicJson = Store.toJSON();
 check('no company name in the public snapshot', !/Example Corp/.test(publicJson));
@@ -887,6 +906,45 @@ check('stats view shown', !$('#view-stats').hidden);
 check('stat cards rendered', $$('#statCards .stat-card').length === 6);
 check('heatmap rendered', $$('#heatmap .hm-cell').length === 26 * 7 + 7);
 check('progress bar per field', $$('#domainProgress .dp-row').length === 5);
+
+/* ---------- 8b. the heatmap is a way into the history ---------- */
+const todayCell = $$('#heatmap .hm-cell').find(c => c.dataset.date === Store.todayISO());
+check('every square knows its date', !!todayCell);
+check('past squares are clickable', todayCell.getAttribute('role') === 'button');
+check('future squares are not',
+      $$('#heatmap .hm-cell.is-future').every(c => c.getAttribute('role') !== 'button'));
+
+/* The hover says what the day held, in the tracker's own words. */
+check('the tooltip names the day', /\d/.test(todayCell.title), todayCell.title);
+check('and counts activities', /activit/.test(todayCell.title), todayCell.title);
+check('listing what was done',
+      /solved|studied|task|note|application/.test(todayCell.title) || /no activities/.test(todayCell.title),
+      todayCell.title);
+
+click(todayCell);
+check('clicking opens the day', !$('#dayDetail').hidden);
+check('the square is marked open', todayCell.classList.contains('is-open') ||
+      !!$('#heatmap .hm-cell.is-open'));
+check('the day is named in full', /\w+day|\d/.test($('.day-detail-head h3').textContent),
+      $('.day-detail-head h3').textContent);
+check('todays solves are listed', /Problems/.test($('#dayDetail').textContent),
+      $('#dayDetail').textContent.slice(0, 120));
+
+click($('#closeDay'));
+check('and it closes again', $('#dayDetail').hidden);
+
+/* A day with nothing on it says so rather than showing an empty box. */
+const emptyCell = $$('#heatmap .hm-cell').find(c => c.dataset.date === Store.shiftDays(Store.todayISO(), -200));
+if (emptyCell) {
+  click(emptyCell);
+  check('a quiet day says so', /Nothing recorded/.test($('#dayDetail').textContent));
+  click($('#closeDay'));
+}
+
+/* GitHub's word for this is contributions; ours is activity, so the two can
+   never be confused with commits. */
+check('nothing calls these contributions',
+      !/contribution/i.test($('#view-stats').textContent), 'the word contributions appeared');
 
 /* ---------- 9. ui state remembered ---------- */
 const ui = JSON.parse(window.localStorage.getItem('learning-tree/ui/v1'));

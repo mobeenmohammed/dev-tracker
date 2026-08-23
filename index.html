@@ -268,8 +268,14 @@
     <div id="appDue" class="due-block" hidden></div>
 
     <div class="stats-block">
-      <h2>Pipeline</h2>
+      <h2>Pipeline
+        <span class="view-switch">
+          <button class="chip-btn is-on" data-app-view="board">List</button>
+          <button class="chip-btn" data-app-view="flow">Flow</button>
+        </span>
+      </h2>
       <div id="appBoard" class="app-board"></div>
+      <div id="appFlow" class="app-flow" hidden></div>
 
       <form id="appForm" class="app-form">
         <input type="text" name="company" placeholder="Company, or paste the posting URL" aria-label="Company or posting URL" required>
@@ -288,8 +294,11 @@
 
     <div class="stats-block">
       <h2>Activity</h2>
-      <p class="muted">Study time over the last 26 weeks.</p>
+      <p class="muted">Everything recorded over the last 26 weeks — study time, tasks, solves,
+        notes and applications. Click a day to open it.</p>
       <div id="heatmap" class="heatmap"></div>
+      <div id="dayDetail" class="day-detail" hidden></div>
+
       <div class="heatmap-legend">
         <span class="muted">Less</span>
         <span class="hm-cell l0"></span><span class="hm-cell l1"></span><span class="hm-cell l2"></span><span class="hm-cell l3"></span><span class="hm-cell l4"></span>
