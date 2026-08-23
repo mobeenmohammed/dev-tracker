@@ -551,9 +551,17 @@
       refresh();
 
       /* Naming what was stored lets the extension clear only those, so a page
-         closed mid-handover loses nothing. */
+         closed mid-handover loses nothing. The names are qualified by source,
+         because two sites can number a problem the same way and clearing the
+         wrong one would lose a solve that was never stored. */
+      const keys = data.solves
+        .filter(s => s && s.problemId)
+        .map(s => `${s.source}:${s.problemId}`);
+
       window.postMessage({
         type: 'dev-tracker/solves-ack',
+        keys,
+        /* The unqualified list is kept for an older extension. */
         problemIds: data.solves.map(s => s && s.problemId).filter(Boolean),
         added: result.added,
         updated: result.updated,

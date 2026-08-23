@@ -388,6 +388,15 @@ check('starting it clears the warning', Store.prerequisiteWarnings().length, 0);
 /* --- journal and Obsidian --- */
 const entry = Store.addEntry('conc', '  finally understood happens-before  ');
 check('an entry is trimmed',      entry.text, 'finally understood happens-before');
+check('it is filed under today',  entry.date, Store.todayISO());
+
+/* A note written just after local midnight belongs to that local day, not to
+   the previous one its UTC timestamp falls in. */
+check('a UTC timestamp is read locally',
+      Store.localDateOf('2026-04-10T23:30:00.000Z'),
+      (() => { const d = new Date('2026-04-10T23:30:00.000Z');
+               const pad = n => String(n).padStart(2, '0');
+               return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; })());
 check('it is stamped with a time', typeof entry.at, 'string');
 check('blank entries are refused', Store.addEntry('conc', '   '), null);
 check('an entry for a missing topic is refused', Store.addEntry('nope', 'text'), null);
@@ -405,6 +414,17 @@ Store.updateNode('conc', { obsidian: 'Just A Note' });
 check('a bare note opens in the current vault',
       Store.obsidianUrl(Store.byId('conc')), 'obsidian://open?file=Just%20A%20Note');
 check('no note, no link', Store.obsidianUrl(Store.byId('proc')), '');
+
+/* Entries written before the local-date field existed are converted from
+   their timestamp rather than left to fall on the wrong day. */
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'x', parentId: null, name: 'X' }],
+  journal: [{ id: 'j', nodeId: 'x', at: '2026-04-10T23:30:00.000Z', text: 'old' }],
+}));
+check('an older entry is given a local date',
+      Store.journalFor('x')[0].date, Store.localDateOf('2026-04-10T23:30:00.000Z'));
+check('and it lands on that day',
+      Store.activityOn(Store.localDateOf('2026-04-10T23:30:00.000Z')).notes.length, 1);
 
 /* --- private branches stay out of the public snapshot --- */
 Store.importJSON(JSON.stringify({
@@ -655,7 +675,7 @@ Store.importJSON(JSON.stringify({
   ],
   problems: [{ id: 'p1', source: 'leetcode', problemId: 'reverse-linked-list',
                title: 'Reverse Linked List', solvedAt: busyDay }],
-  journal: [{ id: 'j1', nodeId: 'git', at: busyDay + 'T18:20:00.000Z', text: 'reflog saved me' }],
+  journal: [{ id: 'j1', nodeId: 'git', date: busyDay, at: busyDay + 'T18:20:00.000Z', text: 'reflog saved me' }],
   applications: [{ id: 'a1', company: 'Example', stage: 'applied',
                    events: [{ id: 'e1', date: busyDay, stage: 'applied' }] }],
 }));

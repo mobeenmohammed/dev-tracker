@@ -45,9 +45,14 @@ async function handover() {
 
   /* No answer means an older tracker without the bridge, or a page that closed
      mid-handover. The queue is left alone and offered again next time. */
-  if (!result || !Array.isArray(result.problemIds)) return;
+  if (!result) return;
 
-  await chrome.runtime.sendMessage({ type: 'queue-delivered', problemIds: result.problemIds });
+  /* Prefer the source-qualified names; fall back for an older tracker. */
+  const keys = Array.isArray(result.keys) ? result.keys : null;
+  const problemIds = Array.isArray(result.problemIds) ? result.problemIds : null;
+  if (!keys && !problemIds) return;
+
+  await chrome.runtime.sendMessage({ type: 'queue-delivered', keys, problemIds });
 }
 
 /* The tracker also offers a digest of what it knows, so a problem page can

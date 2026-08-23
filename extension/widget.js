@@ -52,10 +52,18 @@
     solved: '#38bdf8', review: '#e3a008', resolved: '#a78bfa', mastered: '#34d399',
   };
 
+  /* "Today" is the local day, matching the tracker. Reading it out of a UTC
+     timestamp would put anything logged after local midnight a day out. */
+  function todayLocal() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
   function relativeDay(iso) {
     if (!iso) return null;
-    const days = Math.round((Date.parse(new Date().toISOString().slice(0, 10) + 'T00:00:00Z')
-                            - Date.parse(iso + 'T00:00:00Z')) / 86400000);
+    const days = Math.round((Date.parse(todayLocal() + 'T00:00:00Z')
+                            - Date.parse(String(iso).slice(0, 10) + 'T00:00:00Z')) / 86400000);
     if (days <= 0) return 'today';
     if (days === 1) return 'yesterday';
     if (days < 7) return `${days} days ago`;
@@ -194,15 +202,13 @@
   }
 
   function baseSolve(key) {
-    const now = new Date();
-    const pad = n => String(n).padStart(2, '0');
     return {
       source: key.source,
       problemId: key.problemId,
       title: document.title.replace(/\s*[-|]\s*(LeetCode|Codeforces).*$/i, '').trim() || key.label,
       url: location.href.split('?')[0],
       tags: [],
-      solvedAt: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
+      solvedAt: todayLocal(),
       minutes: 0,
     };
   }

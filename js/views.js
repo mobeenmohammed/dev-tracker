@@ -442,11 +442,10 @@ const Views = (() => {
 
     /* Where the topic has actually been used, which is a stronger claim than
        anything the problem log can make. */
-    const used = Store.projectsUsing(node.id);
-    if (used.length) {
+    if (usedIn.length) {
       const built = document.createElement('div');
       built.className = 'evidence-built';
-      built.innerHTML = `<span class="field-label">Used in</span>` + used.map(({ project, evidence }) => `
+      built.innerHTML = `<span class="field-label">Used in</span>` + usedIn.map(({ project, evidence }) => `
         <div class="built-row">
           <strong>${esc(project.name)}</strong>
           <span>${esc(evidence.join(' · '))}</span>
@@ -500,7 +499,7 @@ const Views = (() => {
         row.className = 'journal-row';
         const when = new Date(entry.at);
         row.innerHTML = `
-          <span class="j-when" title="${esc(entry.at)}">${esc(formatDate(entry.at.slice(0, 10)))}</span>
+          <span class="j-when" title="${esc(entry.at)}">${esc(formatDate(entry.date))}</span>
           <span class="j-text"></span>
           <button class="task-del" title="Remove this note" aria-label="Remove note">&times;</button>`;
         row.querySelector('.j-text').textContent = entry.text;

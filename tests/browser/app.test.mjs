@@ -588,6 +588,9 @@ const ack = await offerSolves([
 ]);
 check('the page acknowledges the handover', !!ack, 'no acknowledgement arrived');
 check('it names what it stored', ack && ack.problemIds, ['1700C']);
+/* Qualified by source, so two sites numbering a problem the same way cannot
+   clear each other from the extension's queue. */
+check('and qualifies them by source', ack && ack.keys, ['codeforces:1700C']);
 check('it reports one added', ack && ack.added === 1, JSON.stringify(ack));
 check('the solve is stored', Store.problemsMatching().length === beforeBridge + 1);
 
@@ -597,7 +600,7 @@ const second = await offerSolves([
   { source: 'codeforces', problemId: '1700C', title: 'Helping the Nature',
     tags: ['greedy'], difficulty: 1500, solvedAt: Store.todayISO() },
 ]);
-check('a repeat handover is acknowledged too', !!second && second.problemIds.length === 1);
+check('a repeat handover is acknowledged too', !!second && second.keys.length === 1);
 check('and adds nothing', second.added === 0, JSON.stringify(second));
 check('no duplicate stored', Store.problemsMatching().length === beforeBridge + 1);
 

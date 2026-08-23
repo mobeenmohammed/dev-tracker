@@ -316,10 +316,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
       /* Only what the tracker confirms it stored is dropped from the queue, so
          a page that closes mid-handover loses nothing. */
       case 'queue-delivered': {
-        const delivered = new Set(msg.problemIds || []);
         const settings = await readSettings();
-        const queue = settings.queue.filter(s => !delivered.has(s.problemId));
-        await writeSettings({ queue, synced: settings.synced + delivered.size });
+
+        /* Source-qualified names where the tracker sends them, since two sites
+           can number a problem the same way; the bare list is only used by an
+           older tracker that does not send the qualified one. */
+        const qualified = Array.isArray(msg.keys) ? new Set(msg.keys) : null;
+        const bare = new Set(msg.problemIds || []);
+        const wasDelivered = s => (qualified
+          ? qualified.has(s.source + ':' + s.problemId)
+          : bare.has(s.problemId));
+
+        const delivered = settings.queue.filter(wasDelivered);
+        const queue = settings.queue.filter(s => !wasDelivered(s));
+        await writeSettings({ queue, synced: settings.synced + delivered.length });
         await updateBadge(queue.length);
         respond({ remaining: queue.length });
         break;

@@ -62,6 +62,16 @@ const Store = (() => {
 
   const nowISO = () => new Date().toISOString();
 
+  /* The local calendar day an instant falls on. A note written at 00:30 in a
+     timezone ahead of UTC is stored as the previous day in UTC, and filing it
+     under yesterday would be wrong on every screen that shows it. */
+  function localDateOf(instant) {
+    const d = new Date(instant);
+    if (Number.isNaN(d.getTime())) return todayISO();
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
   function uid(prefix) {
     return prefix + '-' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
   }
@@ -511,7 +521,7 @@ const Store = (() => {
     const sessions = state.sessions.filter(s => s.date === date);
     const tasks    = state.focus.filter(t => t.date === date);
     const solves   = state.problems.filter(p => p.solvedAt === date);
-    const notes    = state.journal.filter(e => String(e.at).slice(0, 10) === date);
+    const notes    = state.journal.filter(e => e.date === date);
     const applied  = state.applications.filter(a => a.events.some(e => e.date === date));
 
     const minutes = sessions.reduce((sum, s) => sum + s.minutes, 0);
@@ -548,16 +558,21 @@ const Store = (() => {
      app — somewhere to put "finally understood why this works" at the moment
      it happens, so the thought is attached to the topic and the date. */
   function normalizeEntry(e) {
+    const at = e.at || nowISO();
     return {
       id:     String(e.id || uid('j')),
       nodeId: String(e.nodeId),
-      at:     e.at || nowISO(),
+      at,
+      /* The calendar day it belongs to, worked out locally. Older entries
+         predate this field and are converted from their timestamp. */
+      date:   e.date ? String(e.date).slice(0, 10) : localDateOf(at),
       text:   String(e.text || '').trim(),
     };
   }
 
   function addEntry(nodeId, text) {
-    const entry = normalizeEntry({ id: uid('j'), nodeId, text, at: nowISO() });
+    const now = nowISO();
+    const entry = normalizeEntry({ id: uid('j'), nodeId, text, at: now, date: localDateOf(now) });
     if (!entry.text || !byId(nodeId)) return null;
     state.journal.push(entry);
     persist();
@@ -1804,7 +1819,7 @@ const Store = (() => {
     addNode, updateNode, deleteNode, addSession, deleteSession, updateProfile,
     addItem, toggleItem, updateItem, deleteItem, checklistOf,
     addEntry, updateEntry, deleteEntry, journalFor, obsidianUrl,
-    activityOn, activityLevel,
+    activityOn, activityLevel, localDateOf,
     PROJECT_STATES, projects, addProject, updateProject, deleteProject, projectProgress,
     addMilestone, toggleMilestone, deleteMilestone, linkConcept, unlinkConcept, projectsUsing,
     GOAL_TARGETS, goals, addGoal, updateGoal, deleteGoal,
