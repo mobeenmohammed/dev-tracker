@@ -12,7 +12,7 @@
   let activeField = null;     // null = every field in one tree
   let selectedId  = null;
   let showActivity = true;    // applied to the tree once it has been initialised
-  let layoutMode  = 'cards';  // 'cards' | 'radial'
+  let inspectorWidth = 340;   // px, dragged by the divider and remembered
 
   const VIEWS = ['tree', 'focus', 'list', 'stats'];
 
@@ -26,7 +26,7 @@
       localStorage.setItem(UI_KEY, JSON.stringify({
         currentView, activeField,
         showActivity: Tree.showActivity,
-        layoutMode: Tree.layoutMode,
+        inspectorWidth,
       }));
     } catch { /* private mode */ }
   }
@@ -43,7 +43,64 @@
     /* A field deleted since last visit falls back to the combined tree. */
     activeField = saved.activeField && Store.byId(saved.activeField) ? saved.activeField : null;
     showActivity = saved.showActivity !== false;
-    layoutMode = saved.layoutMode === 'radial' ? 'radial' : 'cards';
+    if (Number.isFinite(saved.inspectorWidth)) inspectorWidth = saved.inspectorWidth;
+  }
+
+  /* ---------------- resizable inspector ---------------- */
+
+  const MIN_INSPECTOR = 280;
+  const MAX_INSPECTOR = 720;
+
+  function applyInspectorWidth() {
+    const max = Math.min(MAX_INSPECTOR, Math.round(window.innerWidth * 0.6));
+    inspectorWidth = Math.max(MIN_INSPECTOR, Math.min(max, Math.round(inspectorWidth)));
+    document.documentElement.style.setProperty('--inspector-w', inspectorWidth + 'px');
+  }
+
+  /* Dragging the divider grows the inspector leftwards; the tree refits so
+     nothing ends up hidden behind the panel. */
+  function wireInspectorResizer() {
+    const handle = document.getElementById('inspectorResizer');
+    let dragging = false;
+
+    const move = ev => {
+      if (!dragging) return;
+      inspectorWidth = window.innerWidth - ev.clientX;
+      applyInspectorWidth();
+    };
+
+    const stop = () => {
+      if (!dragging) return;
+      dragging = false;
+      handle.classList.remove('is-dragging');
+      document.body.classList.remove('is-resizing');
+      window.removeEventListener('pointermove', move);
+      persistUi();
+      if (currentView === 'tree') Tree.fit();
+    };
+
+    handle.addEventListener('pointerdown', ev => {
+      ev.preventDefault();
+      dragging = true;
+      handle.classList.add('is-dragging');
+      document.body.classList.add('is-resizing');
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', stop, { once: true });
+    });
+
+    /* keyboard-reachable, since a drag handle otherwise is not */
+    handle.addEventListener('keydown', ev => {
+      const step = ev.shiftKey ? 60 : 20;
+      if (ev.key === 'ArrowLeft')  { inspectorWidth += step; }
+      else if (ev.key === 'ArrowRight') { inspectorWidth -= step; }
+      else return;
+      ev.preventDefault();
+      applyInspectorWidth();
+      persistUi();
+      if (currentView === 'tree') Tree.fit();
+    });
+
+    window.addEventListener('resize', applyInspectorWidth);
   }
 
   /* ---------------- toast ---------------- */
@@ -225,7 +282,18 @@
     switch (action) {
       case 'export':
         download('learning.json', Store.toJSON());
-        toast('Exported — drop it into data/learning.json and commit.');
+        toast(Store.hasPrivateData()
+          ? 'Public snapshot exported — private branches were left out.'
+          : 'Exported — drop it into data/learning.json and commit.');
+        break;
+
+      case 'export-private':
+        if (!Store.hasPrivateData()) {
+          toast('Nothing is marked private yet.');
+          return;
+        }
+        download('private.json', Store.toPrivateJSON());
+        toast('Private data exported — save as data/private.json (git-ignored).');
         break;
 
       case 'copy':
@@ -433,6 +501,12 @@
       /* From a list row: select it without leaving the list. */
       onSelect: id => selectNode(id),
       onChanged: refresh,
+      /* A description or checklist edit saves without rebuilding the panel the
+         user is typing into; only the tree and secondary views need redrawing. */
+      onQuietChange: () => {
+        Tree.render();
+        if (currentView === 'list') Views.renderList(selectedId);
+      },
     });
 
     Tree.init({
@@ -463,7 +537,6 @@
     });
 
     Tree.setShowActivity(showActivity);
-    Tree.setLayout(layoutMode);
     Tree.setRoot(activeField);
 
     document.querySelectorAll('.tab-fixed').forEach(tab =>
@@ -478,20 +551,6 @@
 
     document.getElementById('expandAllBtn').addEventListener('click', () => Tree.expandAll());
 
-    const layoutBtn = document.getElementById('layoutBtn');
-    const syncLayoutBtn = () => {
-      layoutBtn.classList.toggle('is-on', Tree.layoutMode === 'radial');
-      layoutBtn.title = Tree.layoutMode === 'cards'
-        ? 'Switch to the radial map'
-        : 'Switch back to the card tree';
-    };
-    syncLayoutBtn();
-    layoutBtn.addEventListener('click', () => {
-      Tree.setLayout(Tree.layoutMode === 'cards' ? 'radial' : 'cards');
-      syncLayoutBtn();
-      persistUi();
-    });
-
     const activityBtn = document.getElementById('activityBtn');
     activityBtn.classList.toggle('is-on', Tree.showActivity);
     activityBtn.addEventListener('click', () => {
@@ -501,7 +560,6 @@
     });
 
     document.getElementById('addDomainBtn').addEventListener('click', startNewField);
-    document.getElementById('emptyAddBtn').addEventListener('click', addTopicUnderSelection);
 
     document.getElementById('listStatusFilter').addEventListener('change', () => Views.renderList(selectedId));
     document.getElementById('listDomainFilter').addEventListener('change', () => Views.renderList(selectedId));
@@ -516,6 +574,8 @@
       Views.submitFocusTask();
     });
 
+    applyInspectorWidth();
+    wireInspectorResizer();
     wireDataMenu();
     wireSearch();
     wireKeyboard();

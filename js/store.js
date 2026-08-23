@@ -9,8 +9,10 @@
 
 const Store = (() => {
 
-  const LS_KEY    = 'learning-tree/state/v1';
-  const SEED_URL  = 'data/learning.json';
+  const LS_KEY      = 'learning-tree/state/v1';
+  const SEED_URL    = 'data/learning.json';
+  /* Optional, git-ignored, and only ever present on your own machine. */
+  const PRIVATE_URL = 'data/private.json';
 
   const STATUSES = [
     { id: 'planned',    label: 'Planned',    weight: 0.00, cssVar: '--st-planned'    },
@@ -64,17 +66,31 @@ const Store = (() => {
     return prefix + '-' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
   }
 
+  /* Checklist entries double as resources: anything with a URL renders as a
+     link, everything else as a plain task. */
+  function normalizeItems(list) {
+    if (!Array.isArray(list)) return [];
+    return list.map(it => ({
+      id:   String(it.id || uid('i')),
+      text: String(it.text || it.label || it.url || '').trim(),
+      url:  it.url ? String(it.url) : '',
+      done: !!it.done,
+    })).filter(it => it.text);
+  }
+
   function normalizeNode(n) {
     return {
-      id:        String(n.id),
-      parentId:  n.parentId == null ? null : String(n.parentId),
-      name:      String(n.name || 'Untitled'),
-      status:    STATUS_BY_ID[n.status] ? n.status : 'planned',
-      tags:      Array.isArray(n.tags) ? n.tags.map(String) : [],
-      notes:     typeof n.notes === 'string' ? n.notes : '',
-      resources: Array.isArray(n.resources)
-        ? n.resources.filter(r => r && r.url).map(r => ({ label: String(r.label || r.url), url: String(r.url) }))
-        : [],
+      id:       String(n.id),
+      parentId: n.parentId == null ? null : String(n.parentId),
+      name:     String(n.name || 'Untitled'),
+      status:   STATUS_BY_ID[n.status] ? n.status : 'planned',
+      tags:     Array.isArray(n.tags) ? n.tags.map(String) : [],
+      /* `notes` was the old name for this field. */
+      description: typeof n.description === 'string' ? n.description
+                 : typeof n.notes === 'string' ? n.notes : '',
+      /* `resources` was the old name, before entries could be ticked off. */
+      items:     normalizeItems(n.items && n.items.length ? n.items : n.resources),
+      private:   !!n.private,
       createdAt: n.createdAt || todayISO(),
       updatedAt: n.updatedAt || n.createdAt || todayISO(),
     };
@@ -146,16 +162,20 @@ const Store = (() => {
 
   /* ---------------- loading ---------------- */
 
-  async function fetchSeed() {
+  async function fetchJSON(url, quiet = false) {
     try {
-      const res = await fetch(SEED_URL, { cache: 'no-store' });
+      const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return await res.json();
     } catch (err) {
-      console.info('Seed file unavailable (' + err.message + '); using local state only.');
+      if (!quiet) console.info(url + ' unavailable (' + err.message + '); using local state only.');
       return null;
     }
   }
+
+  const fetchSeed = () => fetchJSON(SEED_URL);
+  /* A missing private file is the normal case on a published site. */
+  const fetchPrivate = () => fetchJSON(PRIVATE_URL, true);
 
   async function init() {
     const seed  = await fetchSeed();
@@ -174,6 +194,11 @@ const Store = (() => {
       state = normalize(seed || MINIMAL_SEED);
       persist();
     }
+
+    /* Fold in any local private file that is not already represented. */
+    const priv = await fetchPrivate();
+    if (priv && mergeJSON(priv) > 0) persist();
+
     return state;
   }
 
@@ -217,17 +242,30 @@ const Store = (() => {
 
   /* ---------------- derived metrics ---------------- */
 
-  /* A leaf scores its own status weight; a parent averages its children,
-     so a field's progress reflects the whole branch beneath it. */
+  /* A leaf scores its checklist if it has one, because ticking items off is
+     the most concrete signal of progress; without a checklist it falls back to
+     the weight of its status. A parent averages its children, so a field's
+     progress reflects the whole branch beneath it. */
   function progressOf(id, seen = new Set()) {
     if (seen.has(id)) return 0;
     seen.add(id);
+
     const kids = childrenOf(id);
-    if (!kids.length) {
-      const node = byId(id);
-      return node ? STATUS_BY_ID[node.status].weight : 0;
+    if (kids.length) {
+      return kids.reduce((sum, k) => sum + progressOf(k.id, seen), 0) / kids.length;
     }
-    return kids.reduce((sum, k) => sum + progressOf(k.id, seen), 0) / kids.length;
+
+    const node = byId(id);
+    if (!node) return 0;
+    if (node.items.length) return node.items.filter(i => i.done).length / node.items.length;
+    return STATUS_BY_ID[node.status].weight;
+  }
+
+  function checklistOf(id) {
+    const node = byId(id);
+    if (!node) return { total: 0, done: 0, ratio: 0 };
+    const done = node.items.filter(i => i.done).length;
+    return { total: node.items.length, done, ratio: node.items.length ? done / node.items.length : 0 };
   }
 
   function minutesFor(id, includeDescendants = true) {
@@ -348,6 +386,62 @@ const Store = (() => {
     persist();
   }
 
+  /* ---------------- checklist items ---------------- */
+
+  function addItem(nodeId, { text, url = '' }) {
+    const node = byId(nodeId);
+    const clean = String(text || '').trim();
+    if (!node || !clean) return null;
+    const item = { id: uid('i'), text: clean, url: String(url || '').trim(), done: false };
+    node.items.push(item);
+    node.updatedAt = todayISO();
+    persist();
+    return item;
+  }
+
+  function toggleItem(nodeId, itemId) {
+    const node = byId(nodeId);
+    const item = node && node.items.find(i => i.id === itemId);
+    if (!item) return null;
+    item.done = !item.done;
+    node.updatedAt = todayISO();
+    persist();
+    return item;
+  }
+
+  function updateItem(nodeId, itemId, patch) {
+    const node = byId(nodeId);
+    const item = node && node.items.find(i => i.id === itemId);
+    if (!item) return null;
+    Object.assign(item, patch);
+    item.text = String(item.text || '').trim();
+    node.updatedAt = todayISO();
+    persist();
+    return item;
+  }
+
+  function deleteItem(nodeId, itemId) {
+    const node = byId(nodeId);
+    if (!node) return;
+    node.items = node.items.filter(i => i.id !== itemId);
+    node.updatedAt = todayISO();
+    persist();
+  }
+
+  /* ---------------- private branches ---------------- */
+
+  /* Marking a node private takes its whole branch with it, so a private field
+     cannot leak through a child that was added later. */
+  function isPrivate(id) {
+    const node = byId(id);
+    if (!node) return false;
+    return node.private || ancestorsOf(id).some(a => a.private);
+  }
+
+  function privateNodeIds() {
+    return new Set(state.nodes.filter(n => isPrivate(n.id)).map(n => n.id));
+  }
+
   /* ---------------- daily focus ---------------- */
 
   /* A checklist per day: what you meant to work on, kept as history once the
@@ -417,26 +511,79 @@ const Store = (() => {
 
   /* ---------------- import / export ---------------- */
 
-  function toJSON() {
-    const ordered = {
-      version:   state.version,
-      updatedAt: state.updatedAt,
-      profile:   state.profile,
-      nodes:     state.nodes,
-      sessions:  state.sessions.slice().sort((a, b) => a.date.localeCompare(b.date)),
-      focus:     state.focus.slice().sort((a, b) => a.date.localeCompare(b.date)),
+  /* The state is split in two on the way out: the public snapshot is what gets
+     committed, and everything under a private branch goes to a file that is
+     git-ignored and never leaves the machine. */
+  function partition(wantPrivate) {
+    const priv = privateNodeIds();
+    const keep = n => priv.has(n.id) === wantPrivate;
+
+    const nodes = state.nodes.filter(keep);
+    const ids = new Set(nodes.map(n => n.id));
+
+    return {
+      nodes,
+      sessions: state.sessions
+        .filter(s => ids.has(s.nodeId))
+        .sort((a, b) => a.date.localeCompare(b.date)),
+      /* A task with no topic is public: it says nothing about a private branch. */
+      focus: state.focus
+        .filter(t => (t.nodeId ? priv.has(t.nodeId) === wantPrivate : !wantPrivate))
+        .sort((a, b) => a.date.localeCompare(b.date)),
     };
-    return JSON.stringify(ordered, null, 2);
   }
+
+  function toJSON() {
+    const { nodes, sessions, focus } = partition(false);
+    return JSON.stringify({
+      version: state.version, updatedAt: state.updatedAt, profile: state.profile,
+      nodes, sessions, focus,
+    }, null, 2);
+  }
+
+  function toPrivateJSON() {
+    const { nodes, sessions, focus } = partition(true);
+    return JSON.stringify({
+      version: state.version, updatedAt: state.updatedAt, private: true,
+      nodes, sessions, focus,
+    }, null, 2);
+  }
+
+  const hasPrivateData = () => state.nodes.some(n => isPrivate(n.id));
 
   function importJSON(text) {
     const parsed = JSON.parse(text);
     if (!parsed || !Array.isArray(parsed.nodes)) {
-      throw new Error('That file has no "nodes" array — is it a Learning Tree export?');
+      throw new Error('That file has no "nodes" array — is it a tracker export?');
     }
     state = normalize(parsed);
     persist();
     return state;
+  }
+
+  /* Folds a private file into whatever is already loaded, without disturbing
+     the public half. Anything already present by id wins, so importing twice
+     is harmless. */
+  function mergeJSON(text) {
+    const parsed = typeof text === 'string' ? JSON.parse(text) : text;
+    if (!parsed || !Array.isArray(parsed.nodes)) return 0;
+
+    /* Every collection is deduplicated by id, or merging the same file twice
+       would double the logged time and the checklists. */
+    const haveSessions = new Set(state.sessions.map(x => x.id));
+    const haveFocus    = new Set(state.focus.map(x => x.id));
+
+    const merged = normalize({
+      version:  state.version,
+      profile:  state.profile,
+      nodes:    [...state.nodes, ...parsed.nodes.filter(n => !byId(String(n.id)))],
+      sessions: [...state.sessions, ...(parsed.sessions || []).filter(x => !haveSessions.has(String(x.id)))],
+      focus:    [...state.focus, ...(parsed.focus || []).filter(x => !haveFocus.has(String(x.id)))],
+    });
+
+    const added = merged.nodes.length - state.nodes.length;
+    state = merged;
+    return added;
   }
 
   function adoptSeed() {
@@ -467,7 +614,9 @@ const Store = (() => {
     lastWorked, daysBetween, relativeDay,
     focusFor, focusDates, focusSummary, addTask, toggleTask, updateTask, deleteTask, carryOverTo,
     addNode, updateNode, deleteNode, addSession, deleteSession, updateProfile,
-    toJSON, importJSON, adoptSeed, resetToSeed,
+    addItem, toggleItem, updateItem, deleteItem, checklistOf,
+    isPrivate, privateNodeIds,
+    toJSON, toPrivateJSON, hasPrivateData, importJSON, mergeJSON, adoptSeed, resetToSeed,
     todayISO, shiftDays, dayOfWeek, uid,
   };
 })();

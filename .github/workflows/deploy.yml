@@ -1,0 +1,72 @@
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Allow one deploy at a time; never cancel one midway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check the committed data file is valid
+        run: node -e "const d=require('./data/learning.json'); if(!Array.isArray(d.nodes)||!d.nodes.length) throw new Error('data/learning.json has no nodes'); console.log('data ok:', d.nodes.length, 'nodes')"
+
+      - name: Fail if private data was committed by mistake
+        run: |
+          if [ -f data/private.json ]; then
+            echo "data/private.json is committed — it must stay local and git-ignored."
+            exit 1
+          fi
+          if grep -rl '"private": *true' data/ 2>/dev/null | grep -q .; then
+            echo "A node marked private is present in committed data."
+            exit 1
+          fi
+          echo "no private data committed"
+
+      - run: npm test
+
+  deploy:
+    name: Deploy to Pages
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

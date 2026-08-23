@@ -1,11 +1,9 @@
 /* ============================================================
-   tree.js — the learning tree, in two layouts.
+   tree.js — the tree of cards.
 
-   "cards"  — a horizontal tidy tree. Every topic is a card you can act on
-              directly: rename it, advance its status, add a sub-topic, log
-              time. This is the working view.
-   "radial" — the classic dendrogram, every leaf on an equal angular slot.
-              Denser and better for seeing every field at once.
+   A top-down tidy tree: the field sits at the top, its topics on the row
+   below, and so on. Every topic is a card you can act on directly — rename
+   it, advance its status, add a sub-topic, or log time against it.
    ============================================================ */
 
 const Tree = (() => {
@@ -14,21 +12,17 @@ const Tree = (() => {
   const MIN_SCALE = 0.12;
   const MAX_SCALE = 3.5;
 
-  /* radial metrics */
-  const RING_1   = 170;
-  const RING_GAP = 135;
-
   /* card metrics, by depth */
   const CARD = [
-    { w: 210, h: 68 },   // the centre
-    { w: 190, h: 62 },   // fields
-    { w: 172, h: 58 },   // everything below
+    { w: 220, h: 72 },   // the centre
+    { w: 200, h: 66 },   // fields
+    { w: 184, h: 62 },   // everything below
   ];
   const cardFor = depth => CARD[Math.min(depth, CARD.length - 1)];
-  const ROW_GAP = 16;    // vertical space between sibling cards
-  const COL_GAP = 78;    // horizontal space between generations
+  const COL_GAP = 26;    // horizontal space between siblings
+  const ROW_GAP = 54;    // vertical space between generations
 
-  let svg, gViewport, gRings, gLinks, gNodes;
+  let svg, gViewport, gLinks, gNodes;
   let onSelect = () => {};
   let onAction = () => {};
   let collapsed = new Set();
@@ -37,7 +31,6 @@ const Tree = (() => {
   let layoutRoot = null;
   let rootId = null;            // null = every field at once
   let showActivity = true;
-  let layoutMode = 'cards';     // 'cards' | 'radial'
   let editingId = null;         // node whose title is being renamed inline
 
   const view = { x: 0, y: 0, scale: 1 };
@@ -63,7 +56,7 @@ const Tree = (() => {
     if (field) return make(field, 0);
 
     const profile = Store.state.profile;
-    return make({ id: ROOT_ID, name: profile.name || 'Learning', status: 'mastered' }, 0);
+    return make({ id: ROOT_ID, name: profile.name || 'Everything', status: 'mastered' }, 0);
   }
 
   const flatten = root => {
@@ -72,92 +65,50 @@ const Tree = (() => {
     return out;
   };
 
-  /* ---------------- radial layout ---------------- */
+  /* ---------------- layout ---------------- */
 
-  const polar = (angle, radius) => [
-    Math.cos(angle - Math.PI / 2) * radius,
-    Math.sin(angle - Math.PI / 2) * radius,
-  ];
+  /* Leaves are laid out left to right in reading order and every parent
+     centres over its children, which is what keeps branches from crossing.
+     Depth runs downwards, so the tree grows the way it reads. */
+  function layout(root) {
+    const all = flatten(root);
 
-  const radiusForDepth = depth => (depth === 0 ? 0 : RING_1 + (depth - 1) * RING_GAP);
-
-  function layoutRadial(root) {
-    let leafSlot = 0;
-    (function countLeaves(n) {
-      if (!n.children.length) { n.slot = leafSlot++; return; }
-      n.children.forEach(countLeaves);
-    })(root);
-
-    const totalLeaves = Math.max(1, leafSlot);
-
-    (function assign(n) {
-      if (!n.children.length) {
-        n.angle = ((n.slot + 0.5) / totalLeaves) * Math.PI * 2;
-      } else {
-        n.children.forEach(assign);
-        n.angle = (n.children[0].angle + n.children[n.children.length - 1].angle) / 2;
-      }
-      n.radius = radiusForDepth(n.depth);
-      [n.x, n.y] = polar(n.angle, n.radius);
-    })(root);
-
-    root.angle = 0; root.radius = 0; root.x = root.y = 0;
-    return root;
-  }
-
-  /* ---------------- card layout ---------------- */
-
-  /* Leaves stack down the page in reading order and every parent centres on
-     its children, which is what keeps the branches from crossing. */
-  function layoutCards(root) {
-    /* every column is as wide as the widest card sitting in it */
-    const colX = [];
-    flatten(root).forEach(n => {
-      colX[n.depth] = Math.max(colX[n.depth] || 0, cardFor(n.depth).w);
-    });
-
-    const xs = [];
-    colX.forEach((w, d) => { xs[d] = d === 0 ? 0 : xs[d - 1] + colX[d - 1] / 2 + COL_GAP + w / 2; });
-
-    let cursor = 0;
-    (function place(n) {
+    const rowH = [];
+    all.forEach(n => {
       const card = cardFor(n.depth);
       n.w = card.w;
       n.h = card.h;
-      n.x = xs[n.depth];
+      rowH[n.depth] = Math.max(rowH[n.depth] || 0, card.h);
+    });
+
+    const ys = [];
+    rowH.forEach((h, d) => {
+      ys[d] = d === 0 ? 0 : ys[d - 1] + rowH[d - 1] / 2 + ROW_GAP + h / 2;
+    });
+
+    let cursor = 0;
+    (function place(n) {
+      n.y = ys[n.depth];
 
       if (!n.children.length) {
-        n.y = cursor;
-        cursor += card.h + ROW_GAP;
+        n.x = cursor + n.w / 2;
+        cursor += n.w + COL_GAP;
         return;
       }
       n.children.forEach(place);
-      n.y = (n.children[0].y + n.children[n.children.length - 1].y) / 2;
+      n.x = (n.children[0].x + n.children[n.children.length - 1].x) / 2;
     })(root);
 
+    layoutRoot = root;
     return root;
   }
 
-  function layout(root) {
-    return layoutMode === 'radial' ? layoutRadial(root) : layoutCards(root);
-  }
-
-  /* ---------------- links ---------------- */
-
+  /* A vertical S-curve from the parent's bottom edge to the child's top. */
   function linkPath(parent, child) {
-    if (layoutMode === 'radial') {
-      const midR = (parent.radius + child.radius) / 2;
-      const [x1, y1] = polar(parent.angle, parent.radius);
-      const [c1x, c1y] = polar(parent.angle, midR);
-      const [c2x, c2y] = polar(child.angle, midR);
-      const [x2, y2] = polar(child.angle, child.radius);
-      return `M${x1},${y1}C${c1x},${c1y} ${c2x},${c2y} ${x2},${y2}`;
-    }
-    /* card mode: leave the parent's right edge, arrive at the child's left */
-    const x1 = parent.x + parent.w / 2;
-    const x2 = child.x - child.w / 2;
-    const mid = (x1 + x2) / 2;
-    return `M${x1},${parent.y}C${mid},${parent.y} ${mid},${child.y} ${x2},${child.y}`;
+    const y1 = parent.y + parent.h / 2;
+    const y2 = child.y - child.h / 2;
+    const mid = (y1 + y2) / 2;
+    return `M${parent.x},${y1}C${parent.x},${mid} ${child.x},${mid} ${child.x},${y2}`;
   }
 
   /* ---------------- rendering ---------------- */
@@ -199,25 +150,13 @@ const Tree = (() => {
   function render() {
     if (!gNodes) return;              // nothing to draw into until init() has run
 
-    layoutRoot = layout(buildHierarchy());
-    const all = flatten(layoutRoot);
-
-    const empty = document.getElementById('canvasEmpty');
-    if (empty) empty.hidden = all.length > 1 || (!rootId && Store.roots().length > 0);
-
+    const root = layout(buildHierarchy());
+    const all = flatten(root);
     const lit = litSet(all);
     const isDim = n => lit && !lit.has(n.id);
 
-    gRings.replaceChildren();
     gLinks.replaceChildren();
     gNodes.replaceChildren();
-
-    if (layoutMode === 'radial') {
-      const maxDepth = all.reduce((m, n) => Math.max(m, n.depth), 0);
-      for (let d = 1; d <= maxDepth; d++) {
-        gRings.appendChild(el('circle', { class: 'ring', cx: 0, cy: 0, r: radiusForDepth(d) }));
-      }
-    }
 
     all.forEach(parent => parent.children.forEach(child => {
       const path = el('path', { class: 'link' + (isDim(child) ? ' is-dimmed' : ''), d: linkPath(parent, child) });
@@ -225,18 +164,7 @@ const Tree = (() => {
       gLinks.appendChild(path);
     }));
 
-    all.forEach(n => {
-      gNodes.appendChild(layoutMode === 'radial' ? radialNode(n, isDim(n)) : cardNode(n, isDim(n)));
-    });
-  }
-
-  function nodeClasses(n, dim) {
-    const cls = ['node', 'depth-' + Math.min(n.depth, 2)];
-    if (n.id === selectedId) cls.push('is-selected');
-    if (n.hiddenKids)        cls.push('has-hidden-kids');
-    if (dim)                 cls.push('is-dimmed');
-    if (matches(n.name))     cls.push('is-match');
-    return cls.join(' ');
+    all.forEach(n => gNodes.appendChild(cardNode(n, isDim(n))));
   }
 
   function activityOf(n) {
@@ -244,65 +172,16 @@ const Tree = (() => {
     return { worked, age: worked ? Store.daysBetween(worked, Store.todayISO()) : null };
   }
 
-  /* ---------------- radial node (dot + label) ---------------- */
-
-  function radialNode(n, dim) {
-    const g = el('g', { class: nodeClasses(n, dim), transform: `translate(${n.x},${n.y})` });
-
-    const isRoot = n.depth === 0;
-    const hasKids = n.children.length > 0 || n.hiddenKids > 0;
-    const r = isRoot ? 15 : n.depth === 1 ? 10 : hasKids ? 7 : 5.5;
-    const fill = n.isSynthetic ? 'var(--accent)' : statusColor(n.status);
-
-    const { worked, age } = activityOf(n);
-    if (age !== null && age <= 7) g.appendChild(el('circle', { class: 'halo', r: r + 4.5, stroke: fill }));
-    g.appendChild(el('circle', { r, fill }));
-
-    const label = el('text');
-    label.textContent = n.hiddenKids ? `${n.name} (+${n.hiddenKids})` : n.name;
-
-    const subText = showActivity && worked ? Store.relativeDay(worked) : null;
-    const sub = subText ? el('text', { class: 'sub-label' }) : null;
-    if (sub) sub.textContent = subText;
-
-    if (isRoot) {
-      label.setAttribute('text-anchor', 'middle');
-      label.setAttribute('dy', -r - 9);
-      if (sub) { sub.setAttribute('text-anchor', 'middle'); sub.setAttribute('dy', r + 17); }
-    } else {
-      const deg = (n.angle * 180) / Math.PI;
-      const onLeft = deg > 180;
-      const gap = r + 6;
-      const spoke = `rotate(${deg - 90}) translate(${onLeft ? -gap : gap},0)` + (onLeft ? ' rotate(180)' : '');
-      const anchor = onLeft ? 'end' : 'start';
-
-      label.setAttribute('transform', spoke);
-      label.setAttribute('text-anchor', anchor);
-      label.setAttribute('dominant-baseline', 'middle');
-      if (sub) {
-        sub.setAttribute('transform', spoke);
-        sub.setAttribute('text-anchor', anchor);
-        sub.setAttribute('dominant-baseline', 'middle');
-        sub.setAttribute('dy', 11);
-        label.setAttribute('dy', -4);
-      }
-    }
-    g.appendChild(label);
-    if (sub) g.appendChild(sub);
-    g.appendChild(el('circle', { r: Math.max(r + 6, 12), fill: 'transparent' }));
-
-    g.addEventListener('click', ev => { ev.stopPropagation(); select(n.id); });
-    g.addEventListener('dblclick', ev => { ev.stopPropagation(); toggleCollapse(n.id); });
-    return g;
-  }
-
-  /* ---------------- card node ---------------- */
-
   /* Cards are real HTML inside a foreignObject, so they can wrap text and
      carry working buttons instead of being painted shapes. */
   function cardNode(n, dim) {
-    const g = el('g', { class: nodeClasses(n, dim) + ' node-card' });
+    const cls = ['node', 'node-card', 'depth-' + Math.min(n.depth, 2)];
+    if (n.id === selectedId) cls.push('is-selected');
+    if (n.hiddenKids)        cls.push('has-hidden-kids');
+    if (dim)                 cls.push('is-dimmed');
+    if (matches(n.name))     cls.push('is-match');
 
+    const g = el('g', { class: cls.join(' ') });
     const fo = el('foreignObject', {
       x: n.x - n.w / 2, y: n.y - n.h / 2, width: n.w, height: n.h,
     });
@@ -311,11 +190,11 @@ const Tree = (() => {
     card.style.setProperty('--card-color', n.isSynthetic ? 'var(--accent)' : statusColor(n.status));
     if (n.id === selectedId) card.classList.add('is-selected');
     if (matches(n.name)) card.classList.add('is-match');
+    if (!n.isSynthetic && Store.isPrivate(n.id)) card.classList.add('is-private');
 
     card.appendChild(html('div', 'card-bar'));
 
     const body = html('div', 'card-body');
-
     const title = html('div', 'card-title');
     title.textContent = n.name;
     title.title = n.name;
@@ -324,76 +203,47 @@ const Tree = (() => {
     const { worked, age } = activityOf(n);
     const meta = html('div', 'card-meta');
 
-    if (!n.isSynthetic) {
+    if (n.isSynthetic) {
+      const count = html('span', 'card-status');
+      count.textContent = Store.roots().length + ' fields';
+      meta.appendChild(count);
+    } else {
       const status = html('span', 'card-status');
       status.textContent = Store.STATUS_BY_ID[n.status].label;
       meta.appendChild(status);
+
+      const list = Store.checklistOf(n.id);
+      if (list.total) {
+        const chk = html('span', 'card-check');
+        chk.textContent = `${list.done}/${list.total}`;
+        chk.title = `${list.done} of ${list.total} checklist items done`;
+        meta.appendChild(chk);
+      }
 
       if (showActivity) {
         const when = html('span', 'card-when' + (age !== null && age <= 7 ? ' is-fresh' : ''));
         when.textContent = worked ? Store.relativeDay(worked) : 'not started';
         meta.appendChild(when);
       }
+
       const minutes = Store.minutesFor(n.id, true);
       if (minutes) {
         const time = html('span', 'card-time');
         time.textContent = minutes >= 60 ? Math.round(minutes / 60) + 'h' : minutes + 'm';
         meta.appendChild(time);
       }
-    } else {
-      const count = html('span', 'card-status');
-      count.textContent = Store.roots().length + ' fields';
-      meta.appendChild(count);
     }
     body.appendChild(meta);
 
-    /* A parent shows how far its whole branch has come. */
-    if (n.children.length || n.hiddenKids) {
-      const bar = html('div', 'card-progress');
-      const fill = html('i');
-      fill.style.width = Math.round(Store.progressOf(n.id) * 100) + '%';
-      bar.appendChild(fill);
-      body.appendChild(bar);
-    }
+    const bar = html('div', 'card-progress');
+    const fill = html('i');
+    fill.style.width = Math.round(Store.progressOf(n.id) * 100) + '%';
+    bar.appendChild(fill);
+    body.appendChild(bar);
+
     card.appendChild(body);
-
-    /* --- the actions that make the card a place to work, not just a label --- */
-    if (!n.isSynthetic) {
-      const actions = html('div', 'card-actions');
-
-      const action = (label, act, title) => {
-        const btn = html('button', 'card-btn');
-        btn.textContent = label;
-        btn.title = title;
-        btn.dataset.act = act;
-        btn.addEventListener('click', ev => {
-          ev.stopPropagation();
-          handleCardAction(act, n.id);
-        });
-        return btn;
-      };
-
-      actions.appendChild(action('✎', 'rename', 'Rename (or double-click the title)'));
-      actions.appendChild(action('▸', 'advance', 'Move to the next status'));
-      actions.appendChild(action('＋', 'child', 'Add a sub-topic'));
-      actions.appendChild(action('⏱', 'log', 'Log time on this topic'));
-      card.appendChild(actions);
-    }
-
-    /* collapsed branches keep a count so nothing disappears silently */
-    if (n.hiddenKids) {
-      const badge = html('button', 'card-badge');
-      badge.textContent = '+' + n.hiddenKids;
-      badge.title = 'Expand ' + n.hiddenKids + ' hidden sub-topics';
-      badge.addEventListener('click', ev => { ev.stopPropagation(); toggleCollapse(n.id); });
-      card.appendChild(badge);
-    } else if (n.children.length) {
-      const fold = html('button', 'card-badge card-fold');
-      fold.textContent = '–';
-      fold.title = 'Collapse this branch';
-      fold.addEventListener('click', ev => { ev.stopPropagation(); toggleCollapse(n.id); });
-      card.appendChild(fold);
-    }
+    if (!n.isSynthetic) card.appendChild(cardActions(n));
+    card.appendChild(foldControl(n));
 
     card.addEventListener('pointerdown', ev => ev.stopPropagation());   // don't start a pan
     card.addEventListener('click', ev => { ev.stopPropagation(); select(n.id); });
@@ -404,6 +254,38 @@ const Tree = (() => {
 
     if (editingId === n.id) queueMicrotask(() => openTitleEditor(card, n));
     return g;
+  }
+
+  function cardActions(n) {
+    const actions = html('div', 'card-actions');
+    const action = (label, act, title) => {
+      const btn = html('button', 'card-btn');
+      btn.textContent = label;
+      btn.title = title;
+      btn.dataset.act = act;
+      btn.addEventListener('click', ev => { ev.stopPropagation(); handleCardAction(act, n.id); });
+      return btn;
+    };
+    actions.appendChild(action('\u270E', 'rename',  'Rename (or double-click the title)'));
+    actions.appendChild(action('\u25B8', 'advance', 'Move to the next status'));
+    actions.appendChild(action('\uFF0B', 'child',   'Add a sub-topic'));
+    actions.appendChild(action('\u23F1', 'log',     'Log time on this topic'));
+    return actions;
+  }
+
+  /* Collapsed branches keep a count, so nothing disappears silently. */
+  function foldControl(n) {
+    const badge = html('button', 'card-badge' + (n.hiddenKids ? '' : ' card-fold'));
+    if (n.hiddenKids) {
+      badge.textContent = '+' + n.hiddenKids;
+      badge.title = 'Expand ' + n.hiddenKids + ' hidden sub-topics';
+    } else {
+      badge.textContent = '\u2013';
+      badge.title = 'Collapse this branch';
+      if (!n.children.length) badge.style.display = 'none';
+    }
+    badge.addEventListener('click', ev => { ev.stopPropagation(); toggleCollapse(n.id); });
+    return badge;
   }
 
   function handleCardAction(act, nodeId) {
@@ -468,7 +350,7 @@ const Tree = (() => {
     gViewport.setAttribute('transform', `translate(${view.x},${view.y}) scale(${view.scale})`);
   }
 
-  function fit(padding = 70) {
+  function fit(padding = 60) {
     if (!layoutRoot || !gNodes) return;
     const box = gNodes.getBBox();
     const rect = svg.getBoundingClientRect();
@@ -477,6 +359,7 @@ const Tree = (() => {
     const scale = Math.min(
       (rect.width  - padding * 2) / box.width,
       (rect.height - padding * 2) / box.height,
+      1.15,                                     // never blow a single card up
     );
     view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
     view.x = rect.width  / 2 - (box.x + box.width  / 2) * view.scale;
@@ -545,7 +428,7 @@ const Tree = (() => {
     }, { passive: false });
   }
 
-  /* ---------------- selection, collapsing, modes ---------------- */
+  /* ---------------- selection and collapsing ---------------- */
 
   function select(id) {
     selectedId = id === ROOT_ID ? null : id;
@@ -573,18 +456,11 @@ const Tree = (() => {
 
   function setShowActivity(on) { showActivity = !!on; render(); }
 
-  function setLayout(mode) {
-    layoutMode = mode === 'radial' ? 'radial' : 'cards';
-    render();
-    requestAnimationFrame(() => fit());
-  }
-
   /* ---------------- init ---------------- */
 
   function init(opts) {
     svg       = document.getElementById('tree');
     gViewport = document.getElementById('viewport');
-    gRings    = document.getElementById('rings');
     gLinks    = document.getElementById('links');
     gNodes    = document.getElementById('nodes');
     onSelect  = opts.onSelect || onSelect;
@@ -603,10 +479,9 @@ const Tree = (() => {
 
   return {
     init, render, fit, zoom, centerOn, select, expandAll, setQuery, toggleCollapse,
-    setRoot, setShowActivity, setLayout, startRename,
+    setRoot, setShowActivity, startRename,
     get selectedId()   { return selectedId; },
     get rootId()       { return rootId; },
     get showActivity() { return showActivity; },
-    get layoutMode()   { return layoutMode; },
   };
 })();

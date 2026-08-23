@@ -39,8 +39,10 @@
       "notes": "Comfortable with parallel for and reductions. Still shaky on task-based parallelism.",
       "resources": [
         {
-          "label": "OpenMP specifications",
-          "url": "https://www.openmp.org/specifications/"
+          "id": "i-openmp-spec",
+          "text": "Read the OpenMP specification",
+          "url": "https://www.openmp.org/specifications/",
+          "done": true
         }
       ],
       "createdAt": "2026-06-05",

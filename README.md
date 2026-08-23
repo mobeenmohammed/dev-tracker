@@ -25,38 +25,52 @@ with **Focus**, **List** and **Stats** always pinned on the right.
 - **Stats** — overall progress, a 26-week activity heatmap, a study streak,
   per-field progress bars, and the recent session feed.
 
-### Two tree layouts
+### The tree
 
-The button on the canvas switches between them:
+A top-down tidy tree: the field sits at the top, its topics on the row below,
+and so on. Every topic is a card carrying its status, checklist count, when it
+was last worked on, time logged, and a progress bar. Hovering a card reveals
+four actions — rename in place, advance the status one step, add a sub-topic,
+or jump to logging time.
 
-- **Cards** (the default) — a horizontal tidy tree where every topic is a card
-  you can work from directly. Each card carries its status, when it was last
-  worked on, time logged, and a progress bar for its branch. Hovering reveals
-  four actions: rename in place, advance the status one step, add a sub-topic,
-  or jump to logging time. Rectangular cards need room, which is why this
-  layout runs left-to-right instead of around a circle.
-- **Radial map** — the compact dendrogram, better for taking in every field at
-  once. Colour is status, ring distance is depth.
+Drag to pan, scroll to zoom, click a card to inspect it, double-click its title
+to rename, and use the badge in the corner to fold a branch away.
 
-Drag to pan, scroll to zoom, click to inspect, double-click a node to collapse
-its branch.
+### The inspector
+
+Selecting a card opens a panel that reads top to bottom in the order you
+actually think about a topic:
+
+1. **Title** and where it sits.
+2. **What this is** — a description you write, saved as you type.
+3. **Status** — planned through mastered.
+4. **Resources & tasks** — a checklist. Anything with a link becomes one;
+   everything else is a plain task to tick off.
+5. **Progress** — the percentage, and a line saying where it came from.
+6. **Time** — total logged, when you last worked on it, and the session log.
+7. **Details** — name, parent, tags, privacy, timestamps.
+
+Drag the divider on its left edge to make the panel wider (arrow keys work too
+when it has focus); the width is remembered.
 
 ### Knowing when you last worked on something
 
-Every topic tracks its own history, surfaced in four places:
+A topic's recency shows up as a date on its card, a line in the inspector, and
+a highlighted column in the list. A parent reports the most recent activity
+anywhere in its branch, so a quiet field is obvious at a glance. The stopwatch
+button on the canvas toggles the dates on the cards.
 
-- a **halo** around any node worked on in the last 7 days;
-- a **relative date** under each label (`3d ago`, `2w ago`) — toggle with the
-  stopwatch button on the canvas;
-- a **Last worked** line in the inspector, with the exact date;
-- a **when** column in the list, highlighted while it is still recent.
+### How progress is calculated
 
-A parent reports the most recent activity anywhere in its branch, so a quiet
-field is obvious at a glance.
+- A topic with **checklist items** scores `ticked / total`, because ticking
+  things off is the most concrete signal there is.
+- A topic **without** a checklist falls back to the weight of its status.
+- A **parent** averages its children, so a field's percentage reflects
+  everything beneath it.
 
-Progress rolls up the same way: a leaf topic scores its own status, and a
-parent averages its children, so a field's percentage reflects everything
-beneath it.
+One consequence worth knowing: adding a checklist to a topic marked *Mastered*
+drops it to 0% until the items are ticked. That is deliberate — the checklist
+is the more specific claim.
 
 ### Statuses
 
@@ -73,8 +87,25 @@ beneath it.
 There is no backend. The app keeps its working copy in `localStorage`, and
 `data/learning.json` is the versioned snapshot committed to the repo.
 
+### Public and private data
+
+The repository is public, so Pages can serve it. Anything that should not be
+published is marked **private** on its branch in the inspector, and privacy is
+inherited by everything beneath it.
+
+Exporting then produces two files:
+
+| File | Contents | Committed? |
+| --- | --- | --- |
+| `learning.json` | Everything public. | Yes — this is what the site serves. |
+| `private.json` | Private branches, their sessions and their tasks. | No — `data/private.json` is git-ignored. |
+
+The app loads `data/private.json` on startup if it happens to be there, so on
+your own machine the tree is whole, while the published site only ever sees the
+public half. CI fails the build if private data is ever committed.
+
 ```
-edit in the browser  ->  Data ▸ Export JSON  ->  overwrite data/learning.json  ->  commit & push
+edit in the browser  ->  Data ▸ Export public snapshot  ->  overwrite data/learning.json  ->  commit & push
 ```
 
 On load, the app compares the committed file with what is in the browser. If
@@ -116,26 +147,39 @@ Opening `index.html` straight from disk mostly works too, but some browsers
 block the `fetch` of `data/learning.json` over `file://`, in which case the app
 falls back to whatever is in `localStorage`.
 
-## Deploying to GitHub Pages
+## Deploying
 
-1. Push this repo to GitHub.
-2. **Settings ▸ Pages ▸ Build and deployment**, source **Deploy from a branch**.
-3. Branch `main`, folder `/ (root)`. Save.
-4. It appears at `https://<username>.github.io/<repo>/` within a minute or two.
+Pushing to `main` runs `.github/workflows/deploy.yml`, which:
 
-No workflow file is needed — the site is served as-is. The `.nojekyll` file
-stops Pages from running the content through Jekyll.
+1. installs dependencies and runs the whole test suite,
+2. checks `data/learning.json` still parses and holds nodes,
+3. fails the build if any private data was committed by mistake,
+4. and only then publishes to GitHub Pages.
+
+A failing test stops the deploy, so the live site never moves ahead of a broken
+commit. Pages is configured with **GitHub Actions** as its source, not
+"deploy from a branch". The `.nojekyll` file stops Pages running the content
+through Jekyll.
 
 ## Tests
 
 ```bash
-node tests/store.test.mjs
+npm install     # once, for jsdom
+npm test
 ```
 
-Covers the data model: progress roll-up, time aggregation, last-worked
-lookups and relative-date wording, streaks, cascade deletes, the cycle guard on
-moves, timezone-safe date arithmetic, the daily focus checklist and its
-carry-over rules, and the export/import round-trip. No dependencies.
+The site itself has no runtime dependencies — nothing is bundled or built, and
+`index.html` loads four plain scripts. `jsdom` is a dev dependency used only to
+drive the page in tests.
+
+| Suite | What it covers |
+| --- | --- |
+| `tests/store.test.mjs` | The data model, with no dependencies at all. |
+| `tests/browser/app.test.mjs` | The whole UI driven through real events: tabs, cards, the inspector, checklists, privacy, the list, and the focus checklist. |
+| `tests/browser/boot.test.mjs` | Starting up from saved state, including a field deleted since the last visit. |
+| `tests/browser/styles.test.mjs` | That nothing marked `hidden` is still displayed — a real bug once left an invisible overlay covering the canvas. |
+
+
 
 ## Keyboard shortcuts
 
@@ -159,5 +203,6 @@ js/tree.js            radial layout, SVG rendering, pan and zoom
 js/views.js           inspector, list view, stats view
 js/app.js             bootstrap, view switching, import/export, shortcuts
 data/learning.json    the committed snapshot
-tests/store.test.mjs  data model tests
+tests/                data model and browser tests
+.github/workflows/    test-and-deploy pipeline
 ```

@@ -33,7 +33,8 @@
     <div class="menu-wrap">
       <button id="dataMenuBtn" class="btn" aria-haspopup="true" aria-expanded="false">Data</button>
       <div id="dataMenu" class="menu" hidden>
-        <button data-action="export">Export JSON…</button>
+        <button data-action="export">Export public snapshot…</button>
+        <button data-action="export-private">Export private data…</button>
         <button data-action="copy">Copy JSON to clipboard</button>
         <button data-action="import">Import JSON…</button>
         <hr>
@@ -69,7 +70,6 @@
     <div class="canvas-wrap">
       <svg id="tree" role="img" aria-label="Learning tree">
         <g id="viewport">
-          <g id="rings"></g>
           <g id="links"></g>
           <g id="nodes"></g>
         </g>
@@ -85,17 +85,10 @@
         <button class="btn btn-icon" data-zoom="out" title="Zoom out">−</button>
         <button class="btn btn-icon" data-zoom="fit" title="Fit to screen">⤢</button>
         <button class="btn btn-icon" id="expandAllBtn" title="Expand all branches">⊕</button>
-        <button class="btn btn-icon" id="layoutBtn" title="Switch between card tree and radial map">&#9635;</button>
         <button class="btn btn-icon is-on" id="activityBtn" title="Show when each topic was last worked on">&#9201;</button>
       </div>
 
-      <div class="canvas-empty" id="canvasEmpty" hidden>
-        <p class="big">This tree is empty.</p>
-        <p class="muted">Add the first topic you are working on, and it will branch out from here.</p>
-        <button class="btn btn-primary" id="emptyAddBtn">+ Add the first topic</button>
-      </div>
-
-      <p class="canvas-hint">Drag to pan · scroll to zoom · click a node to inspect · double-click to collapse</p>
+      <p class="canvas-hint">Drag to pan · scroll to zoom · click a card to inspect · double-click a title to rename</p>
     </div>
   </section>
 
@@ -184,6 +177,9 @@
   </section>
 
   <!-- ============ INSPECTOR ============ -->
+  <div class="inspector-resizer" id="inspectorResizer" role="separator"
+       aria-orientation="vertical" aria-label="Resize the inspector" tabindex="0"></div>
+
   <aside class="panel inspector" id="inspector">
     <div class="inspector-empty" id="inspectorEmpty">
       <p class="big">Nothing selected</p>

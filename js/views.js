@@ -8,6 +8,7 @@ const Views = (() => {
   let onNavigate = () => {};   // select a node AND reveal it in the tree
   let onSelect   = () => {};   // select a node without leaving the current view
   let onChanged  = () => {};   // tell the app something in the store changed
+  let onQuietChange = () => {};// saved, but do not rebuild the panel being typed in
 
   /* ---------------- small helpers ---------------- */
 
@@ -32,19 +33,10 @@ const Views = (() => {
     return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   }
 
-  /* Resources are edited as one per line: "Label | https://url" */
-  const resourcesToText = list => list.map(r => `${r.label} | ${r.url}`).join('\n');
-
-  function textToResources(text) {
-    return text.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
-      const idx = line.lastIndexOf('|');
-      if (idx === -1) return { label: line, url: line };
-      return { label: line.slice(0, idx).trim() || line.slice(idx + 1).trim(), url: line.slice(idx + 1).trim() };
-    }).filter(r => r.url);
-  }
-
   /* ---------------- inspector ---------------- */
 
+  /* Order matters here: what the topic is, then where it stands, then the
+     concrete things to do, then how far that has got, then the plumbing. */
   function renderInspector(id) {
     const empty = document.getElementById('inspectorEmpty');
     const body  = document.getElementById('inspectorBody');
@@ -58,206 +50,406 @@ const Views = (() => {
     }
     empty.hidden = true;
     body.hidden = false;
+    body.replaceChildren();
 
-    const kids      = Store.childrenOf(node.id);
-    const chain     = Store.ancestorsOf(node.id);
-    const progress  = Store.progressOf(node.id);
-    const own       = Store.minutesFor(node.id, false);
-    const total     = Store.minutesFor(node.id, true);
-    const sessions  = Store.sessionsFor(node.id, false);
-    const worked    = Store.lastWorked(node.id, true);
-    const moveOpts  = [{ id: '', name: '— top level (its own field) —' }]
-      .concat(Store.state.nodes
-        .filter(n => n.id !== node.id && !Store.wouldCycle(node.id, n.id))
-        .map(n => ({ id: n.id, name: '  '.repeat(Store.depthOf(n.id)) + n.name })));
-
-    body.innerHTML = `
-      <div class="insp-head">
-        <div class="insp-breadcrumb">
-          ${chain.length
-            ? chain.map(a => `<span data-goto="${esc(a.id)}">${esc(a.name)}</span>`).join(' <em>/</em> ') + ' <em>/</em> '
-            : '<em>field</em> '}
-        </div>
-        <div class="insp-title">${esc(node.name)}</div>
-      </div>
-
-      <div class="insp-section">
-        <h3>Progress</h3>
-        <div class="progress-bar" title="${kids.length ? 'Rolled up from ' + kids.length + ' children' : 'From this node status'}">
-          <i style="width:${pct(progress)};background:${statusColor(node.status)}"></i>
-        </div>
-        <div class="field-inline" style="margin-top:7px;justify-content:space-between">
-          <span>${pct(progress)} complete</span>
-          <span>${formatHours(total)}${own !== total ? ` <span class="muted">(${formatHours(own)} direct)</span>` : ''}</span>
-        </div>
-        <div class="field-inline" style="margin-top:5px">
-          <span>Last worked:</span>
-          <strong style="color:${worked && Store.daysBetween(worked, Store.todayISO()) <= 7 ? 'var(--st-mastered)' : 'var(--text)'}">
-            ${worked ? esc(Store.relativeDay(worked)) + ' (' + esc(worked) + ')' : 'not yet'}
-          </strong>
-        </div>
-      </div>
-
-      <div class="insp-section">
-        <h3>Status</h3>
-        <div class="status-picker">
-          ${Store.STATUSES.map(s => `
-            <label class="status-opt ${s.id === node.status ? 'is-on' : ''}" style="color:var(${s.cssVar})">
-              <input type="radio" name="status" value="${s.id}" hidden ${s.id === node.status ? 'checked' : ''}>
-              <i class="dot"></i><span>${s.label}</span>
-            </label>`).join('')}
-        </div>
-      </div>
-
-      <div class="insp-section">
-        <h3>Log a session</h3>
-        <form id="sessionForm">
-          <div class="field-row">
-            <input type="date" name="date" value="${Store.todayISO()}" required aria-label="Date">
-            <input type="number" name="minutes" min="1" step="5" value="45" required aria-label="Minutes">
-          </div>
-          <div class="field" style="margin-top:8px">
-            <input type="text" name="note" placeholder="What did you cover?" aria-label="Note">
-          </div>
-          <button class="btn btn-primary btn-sm" type="submit">Log time</button>
-        </form>
-      </div>
-    `;
-
-    /* --- sessions logged directly against this node --- */
-    if (sessions.length) {
-      const sec = document.createElement('div');
-      sec.className = 'insp-section';
-      sec.innerHTML = `<h3>Sessions (${sessions.length})</h3>` + sessions.slice(0, 12).map(s => `
-        <div class="session-row">
-          <span class="date">${formatDate(s.date)}</span>
-          <span class="note">${esc(s.note) || '<em class="muted">no note</em>'}</span>
-          <span><span class="mins">${s.minutes}m</span>
-          <button class="del" data-del-session="${esc(s.id)}" title="Delete this session">×</button></span>
-        </div>`).join('');
-      body.appendChild(sec);
-    }
-
-    /* --- editable details --- */
-    const edit = document.createElement('div');
-    edit.className = 'insp-section';
-    edit.innerHTML = `
-      <h3>Details</h3>
-      <form id="detailsForm">
-        <div class="field">
-          <label for="f-name">Name</label>
-          <input id="f-name" name="name" type="text" value="${esc(node.name)}" required>
-        </div>
-        <div class="field">
-          <label for="f-parent">Sits under</label>
-          <select id="f-parent" name="parentId">
-            ${moveOpts.map(o =>
-              `<option value="${esc(o.id)}" ${o.id === (node.parentId || '') ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}
-          </select>
-        </div>
-        <div class="field">
-          <label for="f-tags">Tags <span class="muted">(comma separated)</span></label>
-          <input id="f-tags" name="tags" type="text" value="${esc(node.tags.join(', '))}">
-        </div>
-        <div class="field">
-          <label for="f-notes">Notes</label>
-          <textarea id="f-notes" name="notes" placeholder="What clicked? What is still fuzzy?">${esc(node.notes)}</textarea>
-        </div>
-        <div class="field">
-          <label for="f-res">Resources <span class="muted">(one per line: Label | URL)</span></label>
-          <textarea id="f-res" name="resources" placeholder="Book or course | https://…">${esc(resourcesToText(node.resources))}</textarea>
-        </div>
-        <button class="btn btn-primary btn-sm" type="submit">Save changes</button>
-        <span id="saveHint" class="muted" style="font-size:11.5px;margin-left:8px"></span>
-      </form>`;
-    body.appendChild(edit);
-
-    /* --- resource links, when there are any --- */
-    if (node.resources.length) {
-      const sec = document.createElement('div');
-      sec.className = 'insp-section';
-      sec.innerHTML = `<h3>Links</h3><ul class="res-list">` + node.resources.map(r =>
-        `<li><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.label)}</a></li>`).join('') + `</ul>`;
-      body.appendChild(sec);
-    }
-
-    /* --- actions --- */
-    const actions = document.createElement('div');
-    actions.className = 'insp-section';
-    actions.innerHTML = `
-      <h3>Actions</h3>
-      <div class="insp-actions">
-        <button class="btn btn-sm" id="addChildBtn">+ Add sub-topic</button>
-        ${kids.length ? `<button class="btn btn-sm" id="collapseBtn">Collapse branch</button>` : ''}
-        <button class="btn btn-sm danger" id="deleteBtn">Delete${kids.length ? ` (+${Store.descendantsOf(node.id).length})` : ''}</button>
-      </div>
-      <p class="muted" style="font-size:11.5px;margin:9px 0 0">
-        Created ${formatDate(node.createdAt)} · updated ${formatDate(node.updatedAt)}${kids.length ? ` · ${kids.length} direct children` : ''}
-      </p>`;
-    body.appendChild(actions);
-
-    wireInspector(node);
+    body.appendChild(inspHead(node));
+    body.appendChild(inspDescription(node));
+    body.appendChild(inspStatus(node));
+    body.appendChild(inspChecklist(node));
+    body.appendChild(inspProgress(node));
+    body.appendChild(inspTime(node));
+    body.appendChild(inspDetails(node));
+    body.appendChild(inspActions(node));
   }
 
-  function wireInspector(node) {
-    const body = document.getElementById('inspectorBody');
+  function section(heading) {
+    const sec = document.createElement('div');
+    sec.className = 'insp-section';
+    if (heading) {
+      const h = document.createElement('h3');
+      h.textContent = heading;
+      sec.appendChild(h);
+    }
+    return sec;
+  }
 
-    body.querySelectorAll('[data-goto]').forEach(link =>
-      link.addEventListener('click', () => onNavigate(link.dataset.goto)));
+  /* --- 1. title --- */
+  function inspHead(node) {
+    const head = document.createElement('div');
+    head.className = 'insp-head';
 
-    body.querySelectorAll('input[name="status"]').forEach(radio =>
-      radio.addEventListener('change', () => {
-        Store.updateNode(node.id, { status: radio.value });
+    const chain = Store.ancestorsOf(node.id);
+    const crumbs = document.createElement('div');
+    crumbs.className = 'insp-breadcrumb';
+    if (chain.length) {
+      chain.forEach((a, i) => {
+        const link = document.createElement('span');
+        link.textContent = a.name;
+        link.addEventListener('click', () => onNavigate(a.id));
+        crumbs.appendChild(link);
+        crumbs.appendChild(document.createTextNode(i < chain.length - 1 ? ' / ' : ' / '));
+      });
+    } else {
+      crumbs.innerHTML = '<em>field</em>';
+    }
+    head.appendChild(crumbs);
+
+    const title = document.createElement('div');
+    title.className = 'insp-title';
+    title.textContent = node.name;
+    if (Store.isPrivate(node.id)) {
+      const lock = document.createElement('span');
+      lock.className = 'insp-lock';
+      lock.textContent = 'private';
+      lock.title = 'This branch is kept out of the public snapshot.';
+      title.appendChild(lock);
+    }
+    head.appendChild(title);
+    return head;
+  }
+
+  /* --- 2. description --- */
+  function inspDescription(node) {
+    const sec = section('What this is');
+
+    const area = document.createElement('textarea');
+    area.id = 'f-description';
+    area.value = node.description;
+    area.placeholder = 'What is this topic, and what would understanding it let you do?';
+    area.setAttribute('aria-label', 'Description');
+    sec.appendChild(area);
+
+    const state = document.createElement('span');
+    state.className = 'save-state';
+    sec.appendChild(state);
+
+    /* Autosaves while typing; the inspector is not rebuilt on save, so the
+       cursor stays where it is. */
+    let timer = null;
+    const save = () => {
+      if (area.value === node.description) return;
+      Store.updateNode(node.id, { description: area.value });
+      state.textContent = 'Saved';
+      setTimeout(() => { if (state.textContent === 'Saved') state.textContent = ''; }, 1600);
+      onQuietChange();
+    };
+    area.addEventListener('input', () => {
+      state.textContent = 'Saving…';
+      clearTimeout(timer);
+      timer = setTimeout(save, 600);
+    });
+    area.addEventListener('blur', () => { clearTimeout(timer); save(); });
+    return sec;
+  }
+
+  /* --- 3. status --- */
+  function inspStatus(node) {
+    const sec = section('Status');
+    const picker = document.createElement('div');
+    picker.className = 'status-picker';
+
+    Store.STATUSES.forEach(s => {
+      const label = document.createElement('label');
+      label.className = 'status-opt' + (s.id === node.status ? ' is-on' : '');
+      label.style.color = `var(${s.cssVar})`;
+      label.innerHTML = `<input type="radio" name="status" value="${s.id}" hidden ${s.id === node.status ? 'checked' : ''}>
+        <i class="dot"></i><span>${s.label}</span>`;
+      label.querySelector('input').addEventListener('change', () => {
+        Store.updateNode(node.id, { status: s.id });
         onChanged();
-      }));
+      });
+      picker.appendChild(label);
+    });
+    sec.appendChild(picker);
+    return sec;
+  }
 
-    body.querySelectorAll('[data-del-session]').forEach(btn =>
-      btn.addEventListener('click', () => {
-        Store.deleteSession(btn.dataset.delSession);
-        onChanged();
-      }));
+  /* --- 4. checklist: the things to read, build or practise --- */
+  function inspChecklist(node) {
+    const list = Store.checklistOf(node.id);
+    const sec = section(`Resources & tasks${list.total ? ` (${list.done}/${list.total})` : ''}`);
 
-    body.querySelector('#sessionForm').addEventListener('submit', ev => {
+    const items = document.createElement('div');
+    items.className = 'check-list';
+
+    node.items.forEach(item => items.appendChild(checkRow(node, item)));
+
+    if (!node.items.length) {
+      const hint = document.createElement('p');
+      hint.className = 'muted check-empty';
+      hint.textContent = 'Add a book, a course, an exercise — anything you can tick off.';
+      items.appendChild(hint);
+    }
+    sec.appendChild(items);
+
+    const form = document.createElement('form');
+    form.className = 'check-add';
+    form.innerHTML = `
+      <input type="text" name="text" placeholder="Add a resource or task" aria-label="New checklist item" autocomplete="off">
+      <input type="url" name="url" placeholder="Link (optional)" aria-label="Link">
+      <button class="btn btn-sm btn-primary" type="submit">Add</button>`;
+    form.addEventListener('submit', ev => {
       ev.preventDefault();
-      const f = new FormData(ev.target);
+      const data = new FormData(form);
+      if (Store.addItem(node.id, { text: data.get('text'), url: data.get('url') })) onChanged();
+    });
+    sec.appendChild(form);
+    return sec;
+  }
+
+  function checkRow(node, item) {
+    const row = document.createElement('div');
+    row.className = 'check-row' + (item.done ? ' is-done' : '');
+    row.dataset.itemId = item.id;
+
+    const box = document.createElement('button');
+    box.className = 'task-check';
+    box.textContent = '\u2713';
+    box.title = item.done ? 'Mark as not done' : 'Mark as done';
+    box.setAttribute('aria-pressed', String(item.done));
+    box.addEventListener('click', () => {
+      Store.toggleItem(node.id, item.id);
+      onChanged();
+    });
+    row.appendChild(box);
+
+    const text = document.createElement('input');
+    text.className = 'check-text';
+    text.value = item.text;
+    text.setAttribute('aria-label', 'Checklist item');
+    text.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') { ev.preventDefault(); text.blur(); }
+      if (ev.key === 'Escape') { text.value = item.text; text.blur(); }
+    });
+    text.addEventListener('blur', () => {
+      const next = text.value.trim();
+      if (!next) { text.value = item.text; return; }
+      if (next === item.text) return;
+      Store.updateItem(node.id, item.id, { text: next });
+      onQuietChange();
+    });
+    row.appendChild(text);
+
+    if (item.url) {
+      const link = document.createElement('a');
+      link.className = 'check-link';
+      link.href = item.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = '\u2197';
+      link.title = item.url;
+      row.appendChild(link);
+    }
+
+    const del = document.createElement('button');
+    del.className = 'task-del';
+    del.textContent = '\u00d7';
+    del.title = 'Remove this item';
+    del.setAttribute('aria-label', 'Remove item');
+    del.addEventListener('click', () => {
+      Store.deleteItem(node.id, item.id);
+      onChanged();
+    });
+    row.appendChild(del);
+    return row;
+  }
+
+  /* --- 5. progress, driven by whatever the checklist says --- */
+  function inspProgress(node) {
+    const sec = section('Progress');
+    const kids = Store.childrenOf(node.id);
+    const list = Store.checklistOf(node.id);
+    const progress = Store.progressOf(node.id);
+
+    const bar = document.createElement('div');
+    bar.className = 'progress-bar';
+    bar.innerHTML = `<i style="width:${pct(progress)};background:${statusColor(node.status)}"></i>`;
+    sec.appendChild(bar);
+
+    const line = document.createElement('div');
+    line.className = 'progress-line';
+    line.innerHTML = `<strong>${pct(progress)}</strong> <span class="muted">complete</span>`;
+    sec.appendChild(line);
+
+    /* Say where the number came from, so it never looks arbitrary. */
+    const source = document.createElement('p');
+    source.className = 'muted progress-source';
+    if (kids.length) {
+      source.textContent = `Averaged across ${kids.length} sub-topic${kids.length === 1 ? '' : 's'}.`;
+    } else if (list.total) {
+      source.textContent = `${list.done} of ${list.total} checklist item${list.total === 1 ? '' : 's'} ticked off.`;
+    } else {
+      source.textContent = `From the status alone. Add checklist items and progress follows them instead.`;
+    }
+    sec.appendChild(source);
+    return sec;
+  }
+
+  /* --- 6. time logged, and the sessions behind it --- */
+  function inspTime(node) {
+    const sec = section('Time');
+    const own = Store.minutesFor(node.id, false);
+    const total = Store.minutesFor(node.id, true);
+    const worked = Store.lastWorked(node.id, true);
+    const fresh = worked && Store.daysBetween(worked, Store.todayISO()) <= 7;
+
+    const summary = document.createElement('div');
+    summary.className = 'insp-facts';
+    summary.innerHTML = `
+      <span>${formatHours(total)}${own !== total ? ` <span class="muted">(${formatHours(own)} here)</span>` : ''}</span>
+      <span class="${fresh ? 'is-fresh' : 'muted'}">${worked ? 'last worked ' + esc(Store.relativeDay(worked)) : 'not started'}</span>`;
+    sec.appendChild(summary);
+
+    const form = document.createElement('form');
+    form.id = 'sessionForm';
+    form.innerHTML = `
+      <div class="field-row">
+        <input type="date" name="date" value="${Store.todayISO()}" required aria-label="Date">
+        <input type="number" name="minutes" min="1" step="5" value="45" required aria-label="Minutes">
+      </div>
+      <div class="field" style="margin-top:8px">
+        <input type="text" name="note" placeholder="What did you cover?" aria-label="Note">
+      </div>
+      <button class="btn btn-primary btn-sm" type="submit">Log time</button>`;
+    form.addEventListener('submit', ev => {
+      ev.preventDefault();
+      const f = new FormData(form);
       Store.addSession({
-        nodeId:  node.id,
-        date:    f.get('date'),
-        minutes: Number(f.get('minutes')),
-        note:    f.get('note'),
+        nodeId: node.id, date: f.get('date'),
+        minutes: Number(f.get('minutes')), note: f.get('note'),
       });
       onChanged();
     });
+    sec.appendChild(form);
 
-    body.querySelector('#detailsForm').addEventListener('submit', ev => {
+    const sessions = Store.sessionsFor(node.id, false);
+    if (sessions.length) {
+      const log = document.createElement('div');
+      log.className = 'session-log';
+      sessions.slice(0, 10).forEach(s => {
+        const row = document.createElement('div');
+        row.className = 'session-row';
+        row.innerHTML = `
+          <span class="date">${esc(formatDate(s.date))}</span>
+          <span class="note">${esc(s.note) || '<em class="muted">no note</em>'}</span>
+          <span><span class="mins">${s.minutes}m</span> <button class="del" title="Delete this session">&times;</button></span>`;
+        row.querySelector('.del').addEventListener('click', () => {
+          Store.deleteSession(s.id);
+          onChanged();
+        });
+        log.appendChild(row);
+      });
+      sec.appendChild(log);
+    }
+    return sec;
+  }
+
+  /* --- 7. details: the plumbing --- */
+  function inspDetails(node) {
+    const sec = section('Details');
+    const moveOpts = [{ id: '', name: '\u2014 top level (its own field) \u2014' }]
+      .concat(Store.state.nodes
+        .filter(n => n.id !== node.id && !Store.wouldCycle(node.id, n.id))
+        .map(n => ({ id: n.id, name: '\u00a0\u00a0'.repeat(Store.depthOf(n.id)) + n.name })));
+
+    const form = document.createElement('form');
+    form.id = 'detailsForm';
+    form.innerHTML = `
+      <div class="field">
+        <label for="f-name">Name</label>
+        <input id="f-name" name="name" type="text" value="${esc(node.name)}" required>
+      </div>
+      <div class="field">
+        <label for="f-parent">Sits under</label>
+        <select id="f-parent" name="parentId">
+          ${moveOpts.map(o =>
+            `<option value="${esc(o.id)}" ${o.id === (node.parentId || '') ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label for="f-tags">Tags <span class="muted">(comma separated)</span></label>
+        <input id="f-tags" name="tags" type="text" value="${esc(node.tags.join(', '))}">
+      </div>
+      <button class="btn btn-primary btn-sm" type="submit">Save changes</button>
+      <span id="saveHint" class="muted save-state"></span>`;
+
+    form.addEventListener('submit', ev => {
       ev.preventDefault();
-      const f = new FormData(ev.target);
+      const f = new FormData(form);
       try {
         Store.updateNode(node.id, {
-          name:      String(f.get('name')).trim() || node.name,
-          parentId:  f.get('parentId') || null,
-          tags:      String(f.get('tags')).split(',').map(t => t.trim()).filter(Boolean),
-          notes:     String(f.get('notes')),
-          resources: textToResources(String(f.get('resources'))),
+          name:     String(f.get('name')).trim() || node.name,
+          parentId: f.get('parentId') || null,
+          tags:     String(f.get('tags')).split(',').map(t => t.trim()).filter(Boolean),
         });
         onChanged();
       } catch (err) {
-        const hint = body.querySelector('#saveHint');
+        const hint = form.querySelector('#saveHint');
         hint.textContent = err.message;
         hint.style.color = 'var(--danger)';
       }
     });
+    sec.appendChild(form);
 
-    body.querySelector('#addChildBtn').addEventListener('click', () => {
+    /* Privacy belongs to the branch, so it lives with the plumbing. */
+    const inherited = !node.private && Store.isPrivate(node.id);
+    const privacy = document.createElement('label');
+    privacy.className = 'privacy-toggle';
+    privacy.innerHTML = `
+      <input type="checkbox" id="f-private" ${node.private ? 'checked' : ''} ${inherited ? 'disabled' : ''}>
+      <span>Keep this branch private</span>`;
+    privacy.querySelector('input').addEventListener('change', ev => {
+      Store.updateNode(node.id, { private: ev.target.checked });
+      onChanged();
+    });
+    sec.appendChild(privacy);
+
+    const hint = document.createElement('p');
+    hint.className = 'muted privacy-hint';
+    hint.textContent = inherited
+      ? 'Already private, because a parent is.'
+      : 'Private branches go to data/private.json, which is git-ignored and never published.';
+    sec.appendChild(hint);
+
+    const stamps = document.createElement('p');
+    stamps.className = 'muted insp-stamps';
+    stamps.textContent = `Created ${formatDate(node.createdAt)} \u00b7 updated ${formatDate(node.updatedAt)}`;
+    sec.appendChild(stamps);
+    return sec;
+  }
+
+  function inspActions(node) {
+    const sec = section('Actions');
+    const kids = Store.childrenOf(node.id);
+    const extra = Store.descendantsOf(node.id).length;
+
+    const row = document.createElement('div');
+    row.className = 'insp-actions';
+
+    const addBtn = document.createElement('button');
+    addBtn.className = 'btn btn-sm';
+    addBtn.id = 'addChildBtn';
+    addBtn.textContent = '+ Add sub-topic';
+    addBtn.addEventListener('click', () => {
       const child = Store.addNode({ parentId: node.id, name: 'New topic' });
       onNavigate(child.id);
     });
+    row.appendChild(addBtn);
 
-    const collapseBtn = body.querySelector('#collapseBtn');
-    if (collapseBtn) collapseBtn.addEventListener('click', () => Tree.toggleCollapse(node.id));
+    if (kids.length) {
+      const fold = document.createElement('button');
+      fold.className = 'btn btn-sm';
+      fold.id = 'collapseBtn';
+      fold.textContent = 'Collapse branch';
+      fold.addEventListener('click', () => Tree.toggleCollapse(node.id));
+      row.appendChild(fold);
+    }
 
-    body.querySelector('#deleteBtn').addEventListener('click', () => {
-      const extra = Store.descendantsOf(node.id).length;
+    const del = document.createElement('button');
+    del.className = 'btn btn-sm danger';
+    del.id = 'deleteBtn';
+    del.textContent = 'Delete' + (extra ? ` (+${extra})` : '');
+    del.addEventListener('click', () => {
       const msg = extra
         ? `Delete "${node.name}" and the ${extra} topic(s) beneath it? This cannot be undone.`
         : `Delete "${node.name}"? This cannot be undone.`;
@@ -266,6 +458,10 @@ const Views = (() => {
       Store.deleteNode(node.id);
       onNavigate(parentId);
     });
+    row.appendChild(del);
+
+    sec.appendChild(row);
+    return sec;
   }
 
   /* ---------------- list view ---------------- */
@@ -370,7 +566,7 @@ const Views = (() => {
         <span class="chev ${foldable ? '' : 'is-leaf'} ${folded ? 'is-collapsed' : ''}">&#9660;</span>
         <span class="dot" style="background:${statusColor(node.status)}"></span>
         <span class="title" title="${esc(node.name)}">${esc(node.name)}</span>
-        ${node.notes ? '<span class="note-flag" title="Has notes">&#9998;</span>' : ''}
+        ${node.description ? '<span class="note-flag" title="Has a description">&#9998;</span>' : ''}
       </span>
       <select data-status-for="${esc(node.id)}" aria-label="Status for ${esc(node.name)}">
         ${Store.STATUSES.map(s =>
@@ -417,7 +613,7 @@ const Views = (() => {
         <span>${formatHours(Store.minutesFor(node.id))} logged</span>
         <span>${pct(Store.progressOf(node.id))} complete</span>
       </div>
-      <textarea id="ld-notes" placeholder="What are you working on here? What clicked, what is still fuzzy?">${esc(node.notes)}</textarea>
+      <textarea id="ld-notes" placeholder="What is this topic, and where have you got to?">${esc(node.description)}</textarea>
       <div class="ld-actions">
         <input type="number" id="ld-mins" min="1" step="5" value="30" style="width:70px" aria-label="Minutes">
         <button class="btn btn-sm btn-primary" id="ld-log">Log time today</button>
@@ -432,7 +628,7 @@ const Views = (() => {
     /* Notes autosave while typing. The list is deliberately not re-rendered
        here — that would tear the textarea out from under the cursor. */
     const saveNotes = () => {
-      Store.updateNode(node.id, { notes: notes.value });
+      Store.updateNode(node.id, { description: notes.value });
       saveState.textContent = 'Saved';
       renderInspector(node.id);
       setTimeout(() => { if (saveState.textContent === 'Saved') saveState.textContent = ''; }, 1800);
@@ -443,7 +639,7 @@ const Views = (() => {
       notesTimer = setTimeout(saveNotes, 600);
     });
     notes.addEventListener('blur', () => {
-      if (notes.value === node.notes) return;
+      if (notes.value === node.description) return;
       clearTimeout(notesTimer);
       saveNotes();
     });
@@ -451,7 +647,7 @@ const Views = (() => {
     panel.querySelector('#ld-log').addEventListener('click', () => {
       const minutes = Number(panel.querySelector('#ld-mins').value) || 0;
       if (minutes <= 0) return;
-      if (notes.value !== node.notes) { clearTimeout(notesTimer); saveNotes(); }
+      if (notes.value !== node.description) { clearTimeout(notesTimer); saveNotes(); }
       Store.addSession({ nodeId: node.id, date: Store.todayISO(), minutes, note: '' });
       onChanged();
     });
@@ -804,6 +1000,7 @@ const Views = (() => {
     onNavigate = opts.onNavigate || onNavigate;
     onSelect   = opts.onSelect   || onSelect;
     onChanged  = opts.onChanged  || onChanged;
+    onQuietChange = opts.onQuietChange || onQuietChange;
   }
 
   return {

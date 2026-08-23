@@ -1,0 +1,418 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { JSDOM, VirtualConsole } from 'jsdom';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const seed = fs.readFileSync(path.join(ROOT, 'data/learning.json'), 'utf8');
+
+const errors = [];
+const vc = new VirtualConsole();
+vc.on('jsdomError', e => errors.push('jsdomError: ' + (e.detail || e.message)));
+vc.on('error', (...a) => errors.push('console.error: ' + a.join(' ')));
+
+const dom = new JSDOM(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'), {
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+  virtualConsole: vc,
+  url: 'http://localhost/',
+});
+const { window } = dom;
+
+// jsdom has no layout engine: stub the geometry the tree renderer reads.
+window.SVGElement.prototype.getBBox = () => ({ x: -400, y: -400, width: 800, height: 800 });
+window.Element.prototype.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, width: 1200, height: 800, right: 1200, bottom: 800 });
+window.SVGElement.prototype.setPointerCapture = () => {};
+window.SVGElement.prototype.releasePointerCapture = () => {};
+window.fetch = async url => (String(url).includes('learning.json')
+  ? { ok: true, json: async () => JSON.parse(seed) }
+  : { ok: false, status: 404 });
+window.confirm = () => true;
+window.alert = msg => errors.push('alert(): ' + msg);
+window.matchMedia = () => ({ matches: false, addEventListener() {} });
+
+const bundle = ['js/store.js', 'js/tree.js', 'js/views.js', 'js/app.js']
+  .map(f => fs.readFileSync(path.join(ROOT, f), 'utf8'))
+  .join(String.fromCharCode(10) + ';' + String.fromCharCode(10));
+window.eval(bundle + ';window.Store = Store; window.Tree = Tree; window.Views = Views;');
+
+await new Promise(r => setTimeout(r, 300));
+
+const doc = window.document;
+const $  = sel => doc.querySelector(sel);
+const $$ = sel => [...doc.querySelectorAll(sel)];
+const Store = window.Store;
+const Tree  = window.Tree;
+
+let pass = 0, fail = 0;
+const check = (label, cond, detail = '') => {
+  cond ? pass++ : fail++;
+  console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}${cond ? '' : '  <- ' + detail}`);
+};
+const click = el => el.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+const fire  = (el, type) => el.dispatchEvent(new window.Event(type, { bubbles: true }));
+const tick  = () => new Promise(r => setTimeout(r, 0));
+const key   = (el, k) => el.dispatchEvent(new window.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+const treeNodes = () => $$('#nodes .node');
+// works in both layouts: cards use .card-title, the radial map uses <text>
+const nodeLabel = el => {
+  const t = el.querySelector('.card-title') || el.querySelector('text');
+  return t ? t.textContent.trim() : '';
+};
+const nodeNamed = name => treeNodes().find(el => nodeLabel(el).startsWith(name));
+// a card handles clicks on its own div; a radial node handles them on the <g>
+const clickNode = name => {
+  const n = nodeNamed(name);
+  if (!n) throw new Error('no node named ' + name);
+  click(n.querySelector('.card') || n);
+};
+const fieldTabs = () => $$('#fieldTabs .tab');
+const tabNamed  = name => fieldTabs().find(t => t.textContent.includes(name));
+
+/* ---------- 1. tab bar ---------- */
+check('tab per field plus All and +', fieldTabs().length === 6, `${fieldTabs().length} tabs`);
+check('All tab present', !!tabNamed('All'));
+check('C++ tab present', !!tabNamed('C++'));
+check('field tab shows progress', /\d+%/.test(tabNamed('C++').textContent), tabNamed('C++').textContent);
+check('All tab active on boot', tabNamed('All').classList.contains('is-active'));
+check('combined tree shows every field', treeNodes().length === 44, `${treeNodes().length}`);
+
+/* ---------- 2. focusing one field ---------- */
+click(tabNamed('C++'));
+const cppCount = 1 + Store.descendantsOf('cpp').length;
+check('C++ tab becomes active', tabNamed('C++').classList.contains('is-active'));
+check('tree re-roots on C++', treeNodes().length === cppCount, `${treeNodes().length} vs ${cppCount}`);
+check('other fields are gone', !nodeNamed('Mathematics'));
+check('C++ is the centre', !!nodeNamed('C++'));
+check('centre node is selectable', !!Store.byId(Tree.rootId), Tree.rootId);
+
+// adding a topic inside the focused field
+clickNode('Tooling');
+check('selected a node inside the field', $('.insp-title').textContent.trim() === 'Tooling');
+const before = Store.state.nodes.length;
+click($('#addChildBtn'));
+check('sub-topic added inside the field', Store.state.nodes.length === before + 1);
+check('it lands under the right parent', Store.byId(Tree.selectedId).parentId === 'cpp-tooling');
+check('tree grew', treeNodes().length === cppCount + 1);
+click($('#deleteBtn'));
+check('and can be removed again', Store.state.nodes.length === before);
+
+/* ---------- 3. cards ---------- */
+check('each node is a card', $$('#nodes .node-card .card').length === treeNodes().length);
+check('cards show a status', $$('#nodes .card-status').length > 0);
+check('cards show a colour bar', $$('#nodes .card-bar').length === treeNodes().length);
+check('parents show branch progress', $$('#nodes .card-progress').length > 0);
+check('cards carry action buttons', $$('#nodes .card-btn').length > 0);
+check('cards do not overlap',
+      (() => {
+        const boxes = $$('#nodes foreignObject').map(f => ({
+          x: +f.getAttribute('x'), y: +f.getAttribute('y'),
+          w: +f.getAttribute('width'), h: +f.getAttribute('height'),
+        }));
+        for (let i = 0; i < boxes.length; i++)
+          for (let j = i + 1; j < boxes.length; j++) {
+            const a = boxes[i], b = boxes[j];
+            if (a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y) return false;
+          }
+        return true;
+      })(), 'two cards share space');
+
+/* card actions */
+const cppCard = nodeNamed('CMake');
+const advance = [...cppCard.querySelectorAll('.card-btn')].find(b => b.dataset.act === 'advance');
+const statusBefore = Store.byId('cpp-cmake').status;
+click(advance);
+check('the card advances status', Store.byId('cpp-cmake').status !== statusBefore,
+      `${statusBefore} -> ${Store.byId('cpp-cmake').status}`);
+
+const addBtn = [...nodeNamed('CMake').querySelectorAll('.card-btn')].find(b => b.dataset.act === 'child');
+const kidsBefore = Store.childrenOf('cpp-cmake').length;
+click(addBtn);
+await tick();     // the inline editor opens on a microtask, as it does in the browser
+check('the card adds a sub-topic', Store.childrenOf('cpp-cmake').length === kidsBefore + 1);
+check('the new card opens for renaming', !!$('#nodes .card-input'));
+const renameInput = $('#nodes .card-input');
+renameInput.value = 'Toolchain files';
+key(renameInput, 'Enter');
+check('inline rename saved', Store.childrenOf('cpp-cmake')[0].name === 'Toolchain files',
+      Store.childrenOf('cpp-cmake')[0].name);
+Store.deleteNode(Store.childrenOf('cpp-cmake')[0].id);
+window.Views.renderList();
+
+/* ---------- 3b. last-worked cues ---------- */
+click(tabNamed('All'));           // OpenMP lives under HPC, not the C++ tab
+clickNode('OpenMP');
+check('inspector reports last worked', /last worked/.test($('#inspectorBody').textContent),
+      $('#inspectorBody').textContent.slice(0, 80));
+
+/* ---------- 3d. the inspector reads top to bottom in the right order ---------- */
+const headings = $$('#inspectorBody .insp-section h3').map(h => h.textContent.replace(/\s*\(.*/, ''));
+check('inspector section order', headings.join(' > ') ===
+      'What this is > Status > Resources & tasks > Progress > Time > Details > Actions',
+      headings.join(' > '));
+check('title comes first', $('#inspectorBody').firstElementChild.classList.contains('insp-head'));
+
+// description autosaves
+const desc = $('#f-description');
+desc.value = 'Shared-memory parallelism with compiler directives.';
+fire(desc, 'blur');
+check('description saved', Store.byId('hpc-openmp').description.startsWith('Shared-memory'),
+      Store.byId('hpc-openmp').description);
+
+// the checklist
+const checkCount = Store.byId('hpc-openmp').items.length;
+$('.check-add [name="text"]').value = 'Work through the tasking chapter';
+$('.check-add [name="url"]').value = 'https://example.com/tasking';
+$('.check-add').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('checklist item added', Store.byId('hpc-openmp').items.length === checkCount + 1);
+check('item row rendered', $$('#inspectorBody .check-row').length === checkCount + 1);
+check('a link is offered', !!$('#inspectorBody .check-link'));
+
+const rows = $$('#inspectorBody .check-row');
+const lastRow = rows[rows.length - 1];
+click(lastRow.querySelector('.task-check'));
+check('ticking an item sticks', Store.byId('hpc-openmp').items.slice(-1)[0].done === true);
+
+// progress now follows the checklist, not the status
+const done = Store.checklistOf('hpc-openmp');
+check('progress equals the checklist ratio',
+      Math.abs(Store.progressOf('hpc-openmp') - done.done / done.total) < 1e-9,
+      `${Store.progressOf('hpc-openmp')} vs ${done.done}/${done.total}`);
+check('progress explains itself',
+      /checklist item/.test($('.progress-source').textContent), $('.progress-source')?.textContent);
+check('the card shows the checklist count', !!nodeNamed('OpenMP').querySelector('.card-check'));
+
+click($$('#inspectorBody .check-row .task-del').slice(-1)[0]);
+check('checklist item removed', Store.byId('hpc-openmp').items.length === checkCount);
+
+/* ---------- 3e. privacy ---------- */
+clickNode('C++');
+$('#f-private').checked = true;
+fire($('#f-private'), 'change');
+check('branch marked private', Store.isPrivate('cpp') === true);
+check('children inherit it', Store.isPrivate('cpp-core') === true);
+check('the card shows a lock', nodeNamed('C++').querySelector('.card').classList.contains('is-private'));
+check('the inspector shows a lock badge', !!$('.insp-lock'));
+
+clickNode('Core Language');
+check('an inherited child cannot untick it', $('#f-private').disabled === true);
+check('and says why', /because a parent is/.test($('.privacy-hint').textContent), $('.privacy-hint')?.textContent);
+
+const publicSnapshot = JSON.parse(Store.toJSON());
+check('public export excludes the private branch',
+      publicSnapshot.nodes.every(n => !n.id.startsWith('cpp')), 'cpp leaked into the public snapshot');
+check('private export carries it',
+      JSON.parse(Store.toPrivateJSON()).nodes.some(n => n.id === 'cpp'));
+
+clickNode('C++');
+$('#f-private').checked = false;
+fire($('#f-private'), 'change');
+check('privacy can be lifted again', Store.isPrivate('cpp') === false);
+
+/* ---------- 3f. the inspector can be dragged wider ---------- */
+const startWidth = parseInt(window.getComputedStyle(doc.documentElement).getPropertyValue('--inspector-w'), 10);
+const resizer = $('#inspectorResizer');
+check('a resize handle exists', !!resizer);
+key(resizer, 'ArrowLeft');
+const grown = parseInt(window.getComputedStyle(doc.documentElement).getPropertyValue('--inspector-w'), 10);
+check('the inspector grows', grown > startWidth, `${startWidth} -> ${grown}`);
+key(resizer, 'ArrowRight');
+check('and shrinks back', parseInt(window.getComputedStyle(doc.documentElement).getPropertyValue('--inspector-w'), 10) === startWidth);
+for (let i = 0; i < 30; i++) key(resizer, 'ArrowRight');
+check('it stops at a minimum',
+      parseInt(window.getComputedStyle(doc.documentElement).getPropertyValue('--inspector-w'), 10) >= 280);
+check('cards show when last worked', $$('#nodes .card-when').length > 0);
+check('recent work highlighted on cards', $$('#nodes .card-when.is-fresh').length > 0);
+click($('#activityBtn'));
+check('activity toggle hides card dates', $$('#nodes .card-when').length === 0);
+click($('#activityBtn'));
+check('and brings them back', $$('#nodes .card-when').length > 0);
+
+/* ---------- 4. starting a brand new field ---------- */
+click($('#addFieldTab'));
+const nameInput = $('.tab-input');
+check('the + tab opens an inline name box', !!nameInput);
+nameInput.value = 'Operating Systems';
+key(nameInput, 'Enter');
+check('new field created', Store.roots().some(r => r.name === 'Operating Systems'));
+check('a tab appeared for it', !!tabNamed('Operating Systems'));
+check('and it is the active tab', tabNamed('Operating Systems').classList.contains('is-active'));
+check('a new field shows as a single card', treeNodes().length === 1, `${treeNodes().length}`);
+check('the field card is still navigable', !!nodeNamed('Operating Systems'));
+check('no empty-state overlay exists', $('#canvasEmpty') === null);
+
+// grow it from its own card, the same way as any other topic
+const osAdd = [...nodeNamed('Operating Systems').querySelectorAll('.card-btn')].find(b => b.dataset.act === 'child');
+click(osAdd);
+await tick();
+key($('#nodes .card-input'), 'Escape');
+check('first topic added from the field card', treeNodes().length === 2);
+const newFieldId = Store.roots().find(r => r.name === 'Operating Systems').id;
+check('the topic belongs to the new field', Store.childrenOf(newFieldId).length === 1);
+
+// cancelling instead of committing
+click($('#addFieldTab'));
+key($('.tab-input'), 'Escape');
+check('Escape cancels a new field', !$('.tab-input') && Store.roots().length === 5,
+      `${Store.roots().length} fields`);
+
+/* ---------- 5. list view ---------- */
+click($$('.tab-fixed').find(t => t.dataset.view === 'list'));
+check('list view shown', !$('#view-list').hidden && $('#view-tree').hidden);
+check('list tab marked active', $$('.tab-fixed').find(t => t.dataset.view === 'list').classList.contains('is-active'));
+check('every topic listed', $$('#view-list .list-row').length === Store.state.nodes.length,
+      `${$$('#view-list .list-row').length} rows vs ${Store.state.nodes.length} nodes`);
+check('grouped by field', $$('#view-list .list-domain').length === 5);
+check('rows show when last worked', $$('#view-list .when').some(w => /ago|today|yesterday/.test(w.textContent)));
+check('recent work highlighted', $$('#view-list .when.is-fresh').length > 0);
+
+// selecting a row must NOT jump to the tree
+const rowFor = id => $$('#view-list .list-row').find(r => r.querySelector(`[data-status-for="${id}"]`));
+click(rowFor('math-bayes').querySelector('.title'));
+check('row selection stays in the list', !$('#view-list').hidden && $('#view-tree').hidden);
+check('row marked selected', rowFor('math-bayes').classList.contains('is-selected'));
+check('inspector followed the selection', $('.insp-title').textContent.trim() === 'Bayesian Inference',
+      $('.insp-title').textContent);
+check('inline editor opened', !!$('.list-detail'));
+check('editor shows the breadcrumb', $('.list-detail .crumb').textContent.includes('Mathematics'));
+
+/* ---------- 6. notes written from the list ---------- */
+const notes = $('#ld-notes');
+notes.value = 'Started the conjugate priors chapter.';
+fire(notes, 'blur');
+check('description saved from the list', Store.byId('math-bayes').description === 'Started the conjugate priors chapter.',
+      Store.byId('math-bayes').description);
+check('inspector picked the description up', $('#f-description').value.includes('conjugate priors'));
+
+// quick time logging from the same panel
+const minsBefore = Store.minutesFor('math-bayes', false);
+$('#ld-mins').value = '25';
+click($('#ld-log'));
+check('time logged from the list', Store.minutesFor('math-bayes', false) === minsBefore + 25);
+check('logging promoted the status', Store.byId('math-bayes').status !== 'planned', Store.byId('math-bayes').status);
+check('row flags that it has a description', !!rowFor('math-bayes').querySelector('.note-flag'));
+
+/* ---------- 7. list sorting and folding ---------- */
+const sortSel = $('#listSort');
+sortSel.value = 'recent';
+fire(sortSel, 'change');
+// The list stays grouped by field, so "last worked" orders within each group.
+const firstGroupDates = (() => {
+  const out = [];
+  for (const el of $$('#listBody > *')) {
+    if (el.classList.contains('list-domain') && out.length) break;
+    if (el.classList.contains('list-row')) {
+      const id = el.querySelector('[data-status-for]').dataset.statusFor;
+      out.push(Store.lastWorked(id) || '');
+    }
+  }
+  return out;
+})();
+check('last-worked sort orders each group', firstGroupDates.every((d, i, a) => i === 0 || a[i - 1] >= d),
+      firstGroupDates.slice(0, 4).join(' | '));
+sortSel.value = 'name';
+fire(sortSel, 'change');
+check('sorting by name works', $$('#view-list .list-row').length === Store.state.nodes.length);
+sortSel.value = 'tree';
+fire(sortSel, 'change');
+
+click($('#view-list .list-domain'));
+check('clicking a field header folds it', $$('#view-list .list-row').length < Store.state.nodes.length);
+click($('#view-list .list-domain'));
+check('and unfolds it again', $$('#view-list .list-row').length === Store.state.nodes.length);
+
+click($('#listCollapseAll'));
+check('collapse all folds every group', $$('#view-list .list-row').length === 0);
+check('button offers to expand again', $('#listCollapseAll').textContent === 'Expand all');
+click($('#listCollapseAll'));
+check('expand all restores the rows', $$('#view-list .list-row').length === Store.state.nodes.length);
+
+/* ---------- 7b. daily focus checklist ---------- */
+click($$('.tab-fixed').find(t => t.dataset.view === 'focus'));
+check('focus view shown', !$('#view-focus').hidden && $('#view-list').hidden);
+check('focus tab marked active', $$('.tab-fixed').find(t => t.dataset.view === 'focus').classList.contains('is-active'));
+check('today starts empty', $('#focusList .focus-empty') !== null);
+check('history shows earlier days', $$('#focusHistory .day-group').length === 2,
+      `${$$('#focusHistory .day-group').length} days`);
+check('a past day shows its score', $('#focusHistory .day-score').textContent === '1/2',
+      $('#focusHistory .day-score').textContent);
+
+// add a task for today, linked to a topic
+$('#focusText').value = 'Finish the MPI collectives exercises';
+$('#focusTopic').value = 'hpc-mpi';
+$('#focusForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('task added for today', Store.focusFor(Store.todayISO()).length === 1);
+check('task row rendered', $$('#focusList .task').length === 1);
+check('linked topic shown as a chip', $('#focusList .task-topic').textContent === 'MPI',
+      $('#focusList .task-topic')?.textContent);
+check('input cleared for the next one', $('#focusText').value === '');
+
+// an empty submission is ignored
+$('#focusText').value = '   ';
+$('#focusForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('blank tasks are ignored', Store.focusFor(Store.todayISO()).length === 1);
+
+// tick it off
+click($('#focusList .task-check'));
+const todays = Store.focusFor(Store.todayISO());
+check('ticking marks it done', todays[0].done === true);
+check('and stamps when', !!todays[0].doneAt);
+check('row shows as done', $('#focusList .task').classList.contains('is-done'));
+check('day summary updated', $('#focusSummary').textContent === '1 of 1 done', $('#focusSummary').textContent);
+click($('#focusList .task-check'));
+check('ticking again undoes it', Store.focusFor(Store.todayISO())[0].done === false);
+
+// edit the text in place
+const taskText = $('#focusList .task-text');
+taskText.value = 'MPI collectives: reduce and allreduce';
+fire(taskText, 'blur');
+check('task text edited in place', Store.focusFor(Store.todayISO())[0].text === 'MPI collectives: reduce and allreduce');
+
+// carry unfinished work forward
+check('carry-over offered', !$('#focusCarry').hidden, 'button hidden');
+check('carry-over names the day', /Carry over 1 unfinished/.test($('#focusCarry').textContent),
+      $('#focusCarry').textContent);
+click($('#focusCarry'));
+check('unfinished task carried to today', Store.focusFor(Store.todayISO()).length === 2);
+check('the carried task keeps its text',
+      Store.focusFor(Store.todayISO()).some(t => t.text === 'Review the MPI collectives notes'));
+check('the original day is untouched', Store.focusFor('2026-08-22').length === 2);
+click($('#focusCarry'));
+check('carrying twice does not duplicate', Store.focusFor(Store.todayISO()).length === 2);
+
+// history folds open
+click($('#focusHistory .day-head'));
+check('history day expands', $$('#focusHistory .day-tasks .task').length > 0);
+click($('#focusHistory .day-head'));
+check('and folds again', $$('#focusHistory .day-tasks').length === 0);
+
+// delete a task
+const countBeforeDelete = Store.focusFor(Store.todayISO()).length;
+click($('#focusList .task-del'));
+check('task deleted', Store.focusFor(Store.todayISO()).length === countBeforeDelete - 1);
+
+// focus tasks survive an export/import round-trip
+check('focus included in export', JSON.parse(Store.toJSON()).focus.length === Store.state.focus.length);
+
+/* ---------- 8. stats still fine ---------- */
+click($$('.tab-fixed').find(t => t.dataset.view === 'stats'));
+check('stats view shown', !$('#view-stats').hidden);
+check('stat cards rendered', $$('#statCards .stat-card').length === 5);
+check('heatmap rendered', $$('#heatmap .hm-cell').length === 26 * 7 + 7);
+check('progress bar per field', $$('#domainProgress .dp-row').length === 5);
+
+/* ---------- 9. ui state remembered ---------- */
+const ui = JSON.parse(window.localStorage.getItem('learning-tree/ui/v1'));
+check('active view persisted', ui.currentView === 'stats', JSON.stringify(ui));
+// Selecting a Mathematics topic from the list moves the tree tab with it, so
+// the node is never selected-but-invisible when the tree comes back.
+check('active field follows the selection', ui.activeField === 'math', JSON.stringify(ui));
+check('the new field still exists', !!Store.byId(newFieldId));
+
+if (errors.length) {
+  console.log('--- runtime errors ---');
+  errors.forEach(e => console.log('  ' + e));
+  fail += errors.length;
+}
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

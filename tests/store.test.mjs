@@ -17,7 +17,11 @@ const sandbox = {
     setItem: (k, v) => mem.set(k, v),
     removeItem: k => mem.delete(k),
   },
-  fetch: async () => ({ ok: true, json: async () => seed }),
+  /* Only the public seed exists here; data/private.json is absent, which is
+     the normal case for a published site. */
+  fetch: async url => (String(url).includes('learning.json')
+    ? { ok: true, json: async () => seed }
+    : { ok: false, status: 404 }),
 };
 vm.createContext(sandbox);
 
@@ -48,8 +52,10 @@ check('depth',                      Store.depthOf('hpc-openmp'), 2);
 /* --- progress: a leaf uses its own status, a parent averages its children --- */
 check('leaf progress (planned)',    Store.progressOf('hpc-cuda'), 0);
 check('leaf progress (proficient)', Store.progressOf('hpc-cache'), 0.8);
+/* OpenMP carries a checklist, so it scores that instead of its status. */
+check('checklist beats status on a leaf', Store.progressOf('hpc-openmp'), 1);
 check('parent rolls up children',   +Store.progressOf('hpc-parallel').toFixed(4),
-                                    +((0.55 + 0.25 + 0) / 3).toFixed(4));
+                                    +((1 + 0.25 + 0) / 3).toFixed(4));
 
 /* --- logged time --- */
 check('minutes logged directly',    Store.minutesFor('hpc', false), 0);
@@ -125,6 +131,87 @@ check('no sessions means no streak', Store.currentStreak(), 0);
 check('day shift is symmetric',      Store.shiftDays(Store.shiftDays('2026-03-29', 1), -1), '2026-03-29');
 check('shift crosses a month end',   Store.shiftDays('2026-02-28', 1), '2026-03-01');
 check('shift crosses a year end',    Store.shiftDays('2026-12-31', 1), '2027-01-01');
+
+/* --- per-topic checklists --- */
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'a', parentId: null, name: 'Field' },
+    { id: 'b', parentId: 'a', name: 'Topic', status: 'mastered' },
+  ],
+}));
+check('a leaf with no checklist uses status', Store.progressOf('b'), 1);
+
+const i1 = Store.addItem('b', { text: 'read chapter 1' });
+Store.addItem('b', { text: 'do the exercises', url: 'https://example.com/ex' });
+check('items added',                 Store.checklistOf('b'), { total: 2, done: 0, ratio: 0 });
+check('an untouched checklist wins over status', Store.progressOf('b'), 0);
+check('blank items refused',         Store.addItem('b', { text: '  ' }), null);
+
+Store.toggleItem('b', i1.id);
+check('ticking one item',            Store.checklistOf('b'), { total: 2, done: 1, ratio: 0.5 });
+check('progress follows the checklist', Store.progressOf('b'), 0.5);
+check('the parent rolls it up',      Store.progressOf('a'), 0.5);
+
+Store.updateItem('b', i1.id, { text: '  renamed  ' });
+check('item text trimmed on edit',   Store.byId('b').items[0].text, 'renamed');
+Store.deleteItem('b', i1.id);
+check('item removed',                Store.checklistOf('b').total, 1);
+
+/* Old files stored these as `resources` with a label, and notes as `notes`. */
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'legacy', parentId: null, name: 'Legacy', notes: 'old note',
+            resources: [{ label: 'A book', url: 'https://example.com' }] }],
+}));
+check('notes migrate to description', Store.byId('legacy').description, 'old note');
+check('resources migrate to items',   Store.byId('legacy').items.length, 1);
+check('the label becomes the text',   Store.byId('legacy').items[0].text, 'A book');
+check('the url is kept',              Store.byId('legacy').items[0].url, 'https://example.com');
+check('migrated items start unticked', Store.byId('legacy').items[0].done, false);
+
+/* --- private branches stay out of the public snapshot --- */
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'pub',   parentId: null,  name: 'Learning' },
+    { id: 'pubk',  parentId: 'pub', name: 'A topic' },
+    { id: 'apps',  parentId: null,  name: 'Applications', private: true },
+    { id: 'appk',  parentId: 'apps', name: 'Some company' },
+  ],
+  sessions: [
+    { id: 's-pub', nodeId: 'pubk', date: '2026-05-01', minutes: 30 },
+    { id: 's-app', nodeId: 'appk', date: '2026-05-01', minutes: 15 },
+  ],
+  focus: [
+    { id: 'f-pub',  date: '2026-05-01', text: 'study', nodeId: 'pubk' },
+    { id: 'f-app',  date: '2026-05-01', text: 'follow up', nodeId: 'appk' },
+    { id: 'f-none', date: '2026-05-01', text: 'unlinked task' },
+  ],
+}));
+check('a marked node is private',       Store.isPrivate('apps'), true);
+check('privacy is inherited by children', Store.isPrivate('appk'), true);
+check('public branches stay public',    Store.isPrivate('pubk'), false);
+check('the tracker knows it holds private data', Store.hasPrivateData(), true);
+
+const pub = JSON.parse(Store.toJSON());
+check('public export drops private nodes', pub.nodes.map(n => n.id), ['pub', 'pubk']);
+check('public export drops their sessions', pub.sessions.map(x => x.id), ['s-pub']);
+check('public export drops their tasks',    pub.focus.map(x => x.id), ['f-pub', 'f-none']);
+
+const secret = JSON.parse(Store.toPrivateJSON());
+check('private export keeps only private nodes', secret.nodes.map(n => n.id), ['apps', 'appk']);
+check('private export carries their sessions',   secret.sessions.map(x => x.id), ['s-app']);
+check('private export carries their tasks',      secret.focus.map(x => x.id), ['f-app']);
+check('the two halves account for every node',
+      pub.nodes.length + secret.nodes.length, 4);
+
+/* Loading the public file then merging the private one restores everything. */
+Store.importJSON(JSON.stringify(pub));
+check('public-only load',            Store.state.nodes.length, 2);
+check('merge reports what it added', Store.mergeJSON(JSON.stringify(secret)), 2);
+check('everything is back',          Store.state.nodes.length, 4);
+check('sessions came with it',       Store.state.sessions.length, 2);
+check('merging again adds nothing',  Store.mergeJSON(JSON.stringify(secret)), 0);
+check('and does not duplicate time', Store.state.sessions.length, 2);
+check('nor duplicate tasks',         Store.state.focus.length, 3);
 
 /* --- the daily focus checklist --- */
 Store.importJSON(JSON.stringify({
