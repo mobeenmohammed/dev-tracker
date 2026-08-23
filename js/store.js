@@ -138,6 +138,18 @@ const Store = (() => {
       .map(t => (t.nodeId && !ids.has(t.nodeId) ? { ...t, nodeId: null } : t));
 
     const problems = (Array.isArray(raw.problems) ? raw.problems : []).map(normalizeProblem);
+
+    /* A reference to a topic that no longer exists is dropped, as is one that
+       points at itself, and a pair is only kept once per direction. */
+    const seenLinks = new Set();
+    const links = (Array.isArray(raw.links) ? raw.links : [])
+      .map(normalizeLink)
+      .filter(l => {
+        const key = l.from + '->' + l.to;
+        if (l.from === l.to || !ids.has(l.from) || !ids.has(l.to) || seenLinks.has(key)) return false;
+        seenLinks.add(key);
+        return true;
+      });
     const applications = (Array.isArray(raw.applications) ? raw.applications : [])
       .map(normalizeApplication)
       .filter(a => a.company);
@@ -161,6 +173,7 @@ const Store = (() => {
       focus,
       problems,
       applications,
+      links,
       tagMap,
       sources: (Array.isArray(raw.sources) ? raw.sources : [])
         .filter(x => x && x.id && x.label)
@@ -463,15 +476,112 @@ const Store = (() => {
     persist();
   }
 
+  /* ---------------- references between topics ---------------- */
+
+  /* The tree says where a topic sits; references say what it relates to.
+     Probability relates to Randomised Algorithms without either owning the
+     other, and only a graph can express that. */
+  function normalizeLink(l) {
+    return {
+      id:    String(l.id || uid('l')),
+      from:  String(l.from),
+      to:    String(l.to),
+      label: typeof l.label === 'string' ? l.label.trim() : '',
+    };
+  }
+
+  function addLink(from, to, label = '') {
+    if (!from || !to || from === to) return null;
+    if (!byId(from) || !byId(to)) return null;
+    /* One reference per pair per direction; re-adding just relabels it. */
+    const existing = state.links.find(l => l.from === from && l.to === to);
+    if (existing) {
+      if (label) { existing.label = label.trim(); persist(); }
+      return existing;
+    }
+    const link = normalizeLink({ id: uid('l'), from, to, label });
+    state.links.push(link);
+    persist();
+    return link;
+  }
+
+  function updateLink(id, patch) {
+    const link = state.links.find(l => l.id === id);
+    if (!link) return null;
+    Object.assign(link, patch);
+    link.label = String(link.label || '').trim();
+    persist();
+    return link;
+  }
+
+  function deleteLink(id) {
+    state.links = state.links.filter(l => l.id !== id);
+    persist();
+  }
+
+  /* Both directions, because a reference is worth seeing from either end. */
+  const linksFor = nodeId => ({
+    out: state.links.filter(l => l.from === nodeId),
+    in:  state.links.filter(l => l.to === nodeId),
+  });
+
+  const relatedTo = nodeId => {
+    const { out, incoming } = { out: state.links.filter(l => l.from === nodeId),
+                                incoming: state.links.filter(l => l.to === nodeId) };
+    return [...new Set([...out.map(l => l.to), ...incoming.map(l => l.from)])];
+  };
+
+  /* ---------------- tag catalogue ---------------- */
+
+  /* A starting vocabulary so tagging is picking rather than inventing. Typing
+     anything else still works — this is a suggestion list, not a whitelist. */
+  const TAG_CATALOGUE = {
+    'Algorithms': [
+      'two pointers', 'sliding window', 'binary search', 'sorting', 'greedy',
+      'dynamic programming', 'divide and conquer', 'backtracking', 'recursion',
+      'bit manipulation', 'simulation', 'prefix sums', 'meet in the middle',
+    ],
+    'Data structures': [
+      'arrays', 'strings', 'hash table', 'stack', 'queue', 'heap', 'linked list',
+      'trees', 'binary search tree', 'trie', 'segment tree', 'fenwick tree',
+      'union find', 'matrix',
+    ],
+    'Graphs': [
+      'graphs', 'bfs', 'dfs', 'shortest paths', 'topological sort',
+      'minimum spanning tree', 'strongly connected components', 'flows', 'matching',
+    ],
+    'Mathematics': [
+      'number theory', 'combinatorics', 'probability', 'statistics', 'geometry',
+      'linear algebra', 'calculus', 'real analysis', 'complex analysis',
+      'differential equations', 'abstract algebra', 'group theory', 'topology',
+      'measure theory', 'set theory', 'logic', 'proof techniques', 'optimisation',
+      'numerical methods', 'graph theory',
+    ],
+    'Systems': [
+      'concurrency', 'parallelism', 'memory', 'caching', 'operating systems',
+      'networking', 'databases', 'compilers', 'distributed systems',
+    ],
+  };
+
+  const catalogueTags = () => Object.values(TAG_CATALOGUE).flat();
+
+  /* Every tag in play: the catalogue plus anything invented on a solve. */
+  const knownTags = () =>
+    [...new Set([...catalogueTags(), ...state.problems.flatMap(p => p.tags)])].sort();
+
   /* ---------------- solved problems ---------------- */
 
+  /* Where a problem came from — a site, a course, a book, anything. */
   const PROBLEM_SOURCES = [
-    { id: 'leetcode',     label: 'LeetCode'      },
-    { id: 'codeforces',   label: 'Codeforces'    },
-    { id: 'projecteuler', label: 'Project Euler' },
-    { id: 'cses',         label: 'CSES'          },
-    { id: 'atcoder',      label: 'AtCoder'       },
-    { id: 'other',        label: 'Other'         },
+    { id: 'leetcode',     label: 'LeetCode'            },
+    { id: 'codeforces',   label: 'Codeforces'          },
+    { id: 'projecteuler', label: 'Project Euler'       },
+    { id: 'cses',         label: 'CSES'                },
+    { id: 'atcoder',      label: 'AtCoder'             },
+    { id: 'university',   label: 'University problem set' },
+    { id: 'textbook',     label: 'Textbook'            },
+    { id: 'interview',    label: 'Interview prep'      },
+    { id: 'other',        label: 'Other'               },
   ];
 
   /* A solve is a discrete event with an identity, not just time spent, which
@@ -752,6 +862,9 @@ const Store = (() => {
         date:  String(e.date || todayISO()).slice(0, 10),
         stage: STAGE_BY_ID[e.stage] ? e.stage : 'applied',
         note:  typeof e.note === 'string' ? e.note : '',
+        /* Auto events come from changing the stage; a mis-click can undo one,
+           while anything written by hand is left alone. */
+        auto:  e.auto === true,
       })).sort((x, y) => x.date.localeCompare(y.date)) : [],
       updatedAt: a.updatedAt || todayISO(),
     };
@@ -764,7 +877,7 @@ const Store = (() => {
     const app = normalizeApplication({ ...data, id: uid('a') });
     if (!app.company) return null;
     if (!app.events.length) {
-      app.events.push({ id: uid('e'), date: app.appliedAt, stage: app.stage, note: 'Added' });
+      app.events.push({ id: uid('e'), date: app.appliedAt, stage: app.stage, note: '', auto: false });
     }
     state.applications.push(app);
     persist();
@@ -772,14 +885,29 @@ const Store = (() => {
   }
 
   /* A stage change is worth remembering as a dated event, because the shape of
-     a search is in its timeline, not just its current state. */
+     a search is in its timeline, not just its current state.
+
+     Correcting a mis-click must leave no trace, though: picking the wrong
+     stage and putting it back should not leave "reached interview" true
+     forever. So a change made the same day, on top of an automatic event
+     nobody has annotated, rewrites that event instead of stacking another —
+     and if it lands back where it already was, the event goes away. */
   function updateApplication(id, patch) {
     const app = state.applications.find(a => a.id === id);
     if (!app) return null;
+
     const before = app.stage;
     Object.assign(app, normalizeApplication({ ...app, ...patch, id: app.id }));
+
     if (patch.stage && patch.stage !== before) {
-      app.events.push({ id: uid('e'), date: todayISO(), stage: patch.stage, note: '' });
+      const last = app.events[app.events.length - 1];
+      const correcting = last && last.auto && !last.note && last.date === todayISO();
+      if (correcting) app.events.pop();
+
+      const current = app.events[app.events.length - 1];
+      if (!current || current.stage !== patch.stage) {
+        app.events.push({ id: uid('e'), date: todayISO(), stage: patch.stage, note: '', auto: true });
+      }
     }
     app.updatedAt = todayISO();
     persist();
@@ -799,6 +927,7 @@ const Store = (() => {
       date: String(date || todayISO()).slice(0, 10),
       stage: STAGE_BY_ID[stage] ? stage : app.stage,
       note: String(note || ''),
+      auto: false,          // added deliberately, so never rewritten
     };
     app.events.push(event);
     app.events.sort((x, y) => x.date.localeCompare(y.date));
@@ -813,6 +942,66 @@ const Store = (() => {
     persist();
   }
 
+  /* Reaching an interview is a fact about the timeline, not about where an
+     application happens to sit now. */
+  const reachedInterview = app =>
+    app.stage === 'interview' || app.events.some(e => e.stage === 'interview');
+
+  /* Job boards put the employer in the URL, so pasting a posting link can fill
+     in most of an application without asking anything of the network. Nothing
+     here makes a request: it is all pattern-matching on the URL itself. */
+  const ATS_PATTERNS = [
+    { board: 'Greenhouse',      host: /(^|\.)(job-)?boards\.greenhouse\.io$/, slug: p => p[0] },
+    { board: 'Lever',           host: /(^|\.)jobs\.lever\.co$/,               slug: p => p[0] },
+    { board: 'Ashby',           host: /(^|\.)jobs\.ashbyhq\.com$/,            slug: p => p[0] },
+    { board: 'SmartRecruiters', host: /(^|\.)smartrecruiters\.com$/,          slug: p => p[0] },
+    { board: 'Workable',        host: /(^|\.)workable\.com$/,                 slug: p => p[0] },
+    { board: 'Teamtailor',      host: /(^|\.)teamtailor\.com$/,               slug: () => '' },
+    { board: 'LinkedIn',        host: /(^|\.)linkedin\.com$/,                 slug: () => '' },
+    { board: 'Indeed',          host: /(^|\.)indeed\.(com|co\.uk)$/,          slug: () => '' },
+    { board: 'Glassdoor',       host: /(^|\.)glassdoor\.(com|co\.uk)$/,       slug: () => '' },
+  ];
+
+  const titleCase = slug => String(slug || '')
+    .replace(/[-_+]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ').map(w => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(' ');
+
+  function parsePosting(rawUrl) {
+    const text = String(rawUrl || '').trim();
+    if (!text) return null;
+
+    let url;
+    try {
+      url = new URL(/^https?:\/\//i.test(text) ? text : 'https://' + text);
+    } catch {
+      return null;
+    }
+
+    const host = url.hostname.replace(/^www\./, '');
+    const parts = url.pathname.split('/').filter(Boolean);
+
+    const ats = ATS_PATTERNS.find(a => a.host.test(host));
+    if (ats) {
+      return { company: titleCase(ats.slug(parts)), source: ats.board, domain: host };
+    }
+
+    /* Workday puts the employer in the subdomain: acme.wd3.myworkdayjobs.com */
+    if (/myworkdayjobs\.com$/.test(host)) {
+      return { company: titleCase(host.split('.')[0]), source: 'Workday', domain: host };
+    }
+
+    /* Otherwise it is the employer's own site, so the domain is the company:
+       careers.acme.com -> Acme. */
+    const labels = host.split('.');
+    const generic = new Set(['careers', 'jobs', 'apply', 'work', 'boards', 'join', 'talent']);
+    const meaningful = labels.filter(l => !generic.has(l));
+    const name = meaningful.length > 1 ? meaningful[meaningful.length - 2] : meaningful[0];
+
+    return { company: titleCase(name), source: 'Company site', domain: host };
+  }
+
   function applicationStats() {
     const all = state.applications;
     const inStage = id => all.filter(a => a.stage === id).length;
@@ -824,7 +1013,7 @@ const Store = (() => {
       open:      all.filter(a => STAGE_BY_ID[a.stage].open).length,
       offers:    inStage('offer'),
       rejected:  inStage('rejected'),
-      interviews: all.filter(a => a.events.some(e => e.stage === 'interview')).length,
+      interviews: all.filter(reachedInterview).length,
       responseRate: sent ? responded / sent : 0,
       /* Anything with a date that has arrived, or is about to. */
       dueSoon: all.filter(a => a.nextDue && a.nextDue <= shiftDays(todayISO(), 3)
@@ -861,25 +1050,28 @@ const Store = (() => {
           return (mapped ? priv.has(mapped) : false) === wantPrivate;
         })
         .sort((a, b) => a.solvedAt.localeCompare(b.solvedAt)),
+      /* A reference is only public when both ends are. */
+      links: state.links.filter(l =>
+        (priv.has(l.from) || priv.has(l.to)) === wantPrivate),
       /* Applications only ever exist in the private half. */
       applications: wantPrivate ? state.applications : [],
     };
   }
 
   function toJSON() {
-    const { nodes, sessions, focus, problems } = partition(false);
+    const { nodes, sessions, focus, problems, links } = partition(false);
     return JSON.stringify({
       version: state.version, updatedAt: state.updatedAt, profile: state.profile,
-      nodes, sessions, focus, problems,
+      nodes, links, sessions, focus, problems,
       tagMap: state.tagMap, sources: state.sources,
     }, null, 2);
   }
 
   function toPrivateJSON() {
-    const { nodes, sessions, focus, problems, applications } = partition(true);
+    const { nodes, sessions, focus, problems, applications, links } = partition(true);
     return JSON.stringify({
       version: state.version, updatedAt: state.updatedAt, private: true,
-      nodes, sessions, focus, problems, applications,
+      nodes, links, sessions, focus, problems, applications,
     }, null, 2);
   }
 
@@ -910,6 +1102,7 @@ const Store = (() => {
     const haveFocus    = new Set(state.focus.map(x => x.id));
     const haveProblems = new Set(state.problems.map(x => x.id));
     const haveApps     = new Set(state.applications.map(x => x.id));
+    const haveLinks    = new Set(state.links.map(x => x.id));
 
     const merged = normalize({
       version:  state.version,
@@ -919,6 +1112,7 @@ const Store = (() => {
       focus:    [...state.focus, ...(parsed.focus || []).filter(x => !haveFocus.has(String(x.id)))],
       problems: [...state.problems, ...(parsed.problems || []).filter(x => !haveProblems.has(String(x.id)))],
       applications: [...state.applications, ...(parsed.applications || []).filter(x => !haveApps.has(String(x.id)))],
+      links:    [...state.links, ...(parsed.links || []).filter(x => !haveLinks.has(String(x.id)))],
       tagMap:   { ...(parsed.tagMap || {}), ...state.tagMap },
       sources:  state.sources,
     });
@@ -962,8 +1156,11 @@ const Store = (() => {
     problemsMatching, problemsForNode, problemStats, recentProblems,
     tagIndex, setTagMapping, nodeForTags,
     isPrivate, privateNodeIds,
+    addLink, updateLink, deleteLink, linksFor, relatedTo,
+    TAG_CATALOGUE, catalogueTags, knownTags,
     APP_STAGES, STAGE_BY_ID, applications, addApplication, updateApplication,
     deleteApplication, addApplicationEvent, deleteApplicationEvent, applicationStats,
+    parsePosting,
     toJSON, toPrivateJSON, hasPrivateData, importJSON, mergeJSON, adoptSeed, resetToSeed,
     todayISO, shiftDays, dayOfWeek, uid,
   };

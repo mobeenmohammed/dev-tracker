@@ -31,7 +31,9 @@ const Tree = (() => {
   let layoutRoot = null;
   let rootId = null;            // null = every field at once
   let showActivity = true;
+  let showRefs = true;          // draw the reference arrows between topics
   let editingId = null;         // node whose title is being renamed inline
+  const pinned = new Set();     // graph nodes the person has dragged into place
 
   const view = { x: 0, y: 0, scale: 1 };
 
@@ -58,6 +60,8 @@ const Tree = (() => {
     const profile = Store.state.profile;
     return make({ id: ROOT_ID, name: profile.name || 'Everything', status: 'mastered' }, 0);
   }
+
+  const isGraphMode = () => rootId === null;
 
   const flatten = root => {
     const out = [];
@@ -103,12 +107,174 @@ const Tree = (() => {
     return root;
   }
 
-  /* A vertical S-curve from the parent's bottom edge to the child's top. */
+  /* A vertical S-curve from the parent's bottom edge to the child's top. In
+     the graph there is no consistent direction, so a plain line is honest. */
   function linkPath(parent, child) {
+    if (isGraphMode()) return `M${parent.x},${parent.y}L${child.x},${child.y}`;
     const y1 = parent.y + parent.h / 2;
     const y2 = child.y - child.h / 2;
     const mid = (y1 + y2) / 2;
     return `M${parent.x},${y1}C${parent.x},${mid} ${child.x},${mid} ${child.x},${y2}`;
+  }
+
+
+  /* ---------------- graph layout (the All view) ---------------- */
+
+  /* One field is a hierarchy and reads best as a tidy tree. Everything at once
+     is not a hierarchy — topics reference each other across fields — so the
+     All view is a force-directed graph in the spirit of a knowledge graph:
+     parent-child edges pull, every pair pushes, and references pull too.
+
+     Positions are cached by node id and reused between renders, so selecting a
+     card or ticking something does not reshuffle the whole picture. */
+  const graphPos = new Map();
+  let graphSignature = '';
+
+  const GRAPH = {
+    iterations: 320,
+    repulsion:  46000,
+    springLen:  132,
+    springK:    0.055,
+    refLen:     190,
+    refK:       0.022,
+    centering:  0.012,
+    damping:    0.86,
+    maxStep:    38,
+  };
+
+  function graphNodes() {
+    return Store.state.nodes.map(n => ({
+      id: n.id,
+      name: n.name,
+      status: n.status,
+      depth: Store.depthOf(n.id),
+      isSynthetic: false,
+      children: [],
+      hiddenKids: 0,
+    }));
+  }
+
+  /* Only recompute when the shape actually changed, not on every repaint. */
+  function signatureOf(nodes, edges) {
+    return nodes.map(n => n.id).sort().join(',') + '|' + edges.map(e => e.a + '>' + e.b).sort().join(',');
+  }
+
+  function simulate(nodes, edges, refs) {
+    const byId = new Map(nodes.map(n => [n.id, n]));
+
+    /* Deterministic starting ring, so an unchanged graph always settles the
+       same way rather than looking different on each reload. */
+    nodes.forEach((n, i) => {
+      const cached = graphPos.get(n.id);
+      if (cached) { n.x = cached.x; n.y = cached.y; }
+      else {
+        const angle = (i / Math.max(1, nodes.length)) * Math.PI * 2;
+        const radius = 160 + (i % 7) * 42;
+        n.x = Math.cos(angle) * radius;
+        n.y = Math.sin(angle) * radius;
+      }
+      n.vx = 0; n.vy = 0;
+    });
+
+    const pull = (list, restLength, k) => list.forEach(({ a, b }) => {
+      const A = byId.get(a), B = byId.get(b);
+      if (!A || !B) return;
+      let dx = B.x - A.x, dy = B.y - A.y;
+      let dist = Math.hypot(dx, dy) || 0.01;
+      const force = (dist - restLength) * k;
+      dx /= dist; dy /= dist;
+      A.vx += dx * force; A.vy += dy * force;
+      B.vx -= dx * force; B.vy -= dy * force;
+    });
+
+    for (let step = 0; step < GRAPH.iterations; step++) {
+      /* Everything pushes everything, which is affordable at this size and
+         keeps unrelated branches from piling up. */
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const A = nodes[i], B = nodes[j];
+          let dx = B.x - A.x, dy = B.y - A.y;
+          let distSq = dx * dx + dy * dy;
+          if (distSq < 1) { dx = (i - j) || 1; dy = (j - i) || 1; distSq = 1; }
+          const dist = Math.sqrt(distSq);
+          const force = GRAPH.repulsion / distSq;
+          dx /= dist; dy /= dist;
+          A.vx -= dx * force; A.vy -= dy * force;
+          B.vx += dx * force; B.vy += dy * force;
+        }
+      }
+
+      pull(edges, GRAPH.springLen, GRAPH.springK);
+      pull(refs,  GRAPH.refLen,    GRAPH.refK);
+
+      nodes.forEach(n => {
+        n.vx -= n.x * GRAPH.centering;
+        n.vy -= n.y * GRAPH.centering;
+        n.vx *= GRAPH.damping;
+        n.vy *= GRAPH.damping;
+
+        const speed = Math.hypot(n.vx, n.vy);
+        if (speed > GRAPH.maxStep) { n.vx = (n.vx / speed) * GRAPH.maxStep; n.vy = (n.vy / speed) * GRAPH.maxStep; }
+        if (n.pinned) return;
+        n.x += n.vx;
+        n.y += n.vy;
+      });
+    }
+
+    /* Cards must not sit on top of each other, so nudge overlaps apart. */
+    for (let pass = 0; pass < 24; pass++) {
+      let moved = false;
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const A = nodes[i], B = nodes[j];
+          const overlapX = (A.w + B.w) / 2 + 16 - Math.abs(B.x - A.x);
+          const overlapY = (A.h + B.h) / 2 + 14 - Math.abs(B.y - A.y);
+          if (overlapX <= 0 || overlapY <= 0) continue;
+
+          moved = true;
+          if (overlapX < overlapY) {
+            const shift = (overlapX / 2) * (B.x >= A.x ? 1 : -1);
+            if (!A.pinned) A.x -= shift;
+            if (!B.pinned) B.x += shift;
+          } else {
+            const shift = (overlapY / 2) * (B.y >= A.y ? 1 : -1);
+            if (!A.pinned) A.y -= shift;
+            if (!B.pinned) B.y += shift;
+          }
+        }
+      }
+      if (!moved) break;
+    }
+
+    nodes.forEach(n => graphPos.set(n.id, { x: n.x, y: n.y }));
+    return nodes;
+  }
+
+  function layoutGraph() {
+    const nodes = graphNodes();
+    nodes.forEach(n => {
+      const card = cardFor(Math.min(n.depth, 2));
+      n.w = card.w; n.h = card.h;
+      n.pinned = pinned.has(n.id);
+    });
+
+    const edges = Store.state.nodes
+      .filter(n => n.parentId)
+      .map(n => ({ a: n.parentId, b: n.id }));
+    const refs = Store.state.links.map(l => ({ a: l.from, b: l.to }));
+
+    const signature = signatureOf(nodes, edges.concat(refs));
+    if (signature !== graphSignature) {
+      graphSignature = signature;
+      simulate(nodes, edges, refs);
+    } else {
+      nodes.forEach(n => {
+        const cached = graphPos.get(n.id);
+        if (cached) { n.x = cached.x; n.y = cached.y; }
+      });
+    }
+
+    return { nodes, edges };
   }
 
   /* ---------------- rendering ---------------- */
@@ -150,21 +316,96 @@ const Tree = (() => {
   function render() {
     if (!gNodes) return;              // nothing to draw into until init() has run
 
-    const root = layout(buildHierarchy());
-    const all = flatten(root);
-    const lit = litSet(all);
-    const isDim = n => lit && !lit.has(n.id);
-
     gLinks.replaceChildren();
     gNodes.replaceChildren();
 
-    all.forEach(parent => parent.children.forEach(child => {
-      const path = el('path', { class: 'link' + (isDim(child) ? ' is-dimmed' : ''), d: linkPath(parent, child) });
-      if (child.id === selectedId || parent.id === selectedId) path.classList.add('is-hot');
+    const { all, edges } = isGraphMode() ? renderGraph() : renderTree();
+    const byId = new Map(all.map(n => [n.id, n]));
+    const lit = litSet(all);
+    const isDim = n => lit && !lit.has(n.id);
+
+    edges.forEach(({ from, to }) => {
+      const path = el('path', { class: 'link' + (isDim(to) ? ' is-dimmed' : ''), d: linkPath(from, to) });
+      if (to.id === selectedId || from.id === selectedId) path.classList.add('is-hot');
       gLinks.appendChild(path);
-    }));
+    });
+
+    if (showRefs) drawReferences(byId, isDim);
 
     all.forEach(n => gNodes.appendChild(cardNode(n, isDim(n))));
+    layoutRoot = { children: [], flat: all };
+  }
+
+  /* One field: the tidy top-down tree. */
+  function renderTree() {
+    const root = layout(buildHierarchy());
+    const all = flatten(root);
+    const edges = [];
+    all.forEach(parent => parent.children.forEach(child => edges.push({ from: parent, to: child })));
+    return { all, edges };
+  }
+
+  /* Everything at once: the force-directed graph. */
+  function renderGraph() {
+    const { nodes, edges } = layoutGraph();
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    return {
+      all: nodes,
+      edges: edges
+        .map(e => ({ from: byId.get(e.a), to: byId.get(e.b) }))
+        .filter(e => e.from && e.to),
+    };
+  }
+
+  /* References are drawn as dashed, arrowed curves in their own colour, so a
+     relationship is never mistaken for containment. */
+  function drawReferences(byId, isDim) {
+    Store.state.links.forEach(link => {
+      const from = byId.get(link.from);
+      const to   = byId.get(link.to);
+      if (!from || !to) return;          // an end is collapsed away or out of view
+
+      const touchesSelection = link.from === selectedId || link.to === selectedId;
+      const cls = ['ref-link'];
+      if (touchesSelection) cls.push('is-hot');
+      if (isDim(from) && isDim(to)) cls.push('is-dimmed');
+
+      const path = el('path', {
+        class: cls.join(' '),
+        d: refPath(from, to),
+        'marker-end': touchesSelection ? 'url(#ref-arrow-hot)' : 'url(#ref-arrow)',
+      });
+      gLinks.appendChild(path);
+
+      if (link.label && touchesSelection) {
+        const label = el('text', {
+          class: 'ref-label',
+          x: (from.x + to.x) / 2,
+          y: (from.y + to.y) / 2 - 6,
+          'text-anchor': 'middle',
+        });
+        label.textContent = link.label;
+        gLinks.appendChild(label);
+      }
+    });
+  }
+
+  /* Bowed away from the straight line so a reference is visible even when it
+     runs alongside a parent-child edge, and stops at the card's edge so the
+     arrowhead is not hidden underneath it. */
+  function refPath(from, to) {
+    const dx = to.x - from.x, dy = to.y - from.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const ux = dx / dist, uy = dy / dist;
+
+    const inset = t => Math.min(t.w / 2, t.h / 2) + 6;
+    const x1 = from.x + ux * inset(from), y1 = from.y + uy * inset(from);
+    const x2 = to.x - ux * inset(to),     y2 = to.y - uy * inset(to);
+
+    const bow = Math.min(70, dist * 0.22);
+    const cx = (x1 + x2) / 2 - uy * bow;
+    const cy = (y1 + y2) / 2 + ux * bow;
+    return `M${x1},${y1}Q${cx},${cy} ${x2},${y2}`;
   }
 
   function activityOf(n) {
@@ -245,7 +486,10 @@ const Tree = (() => {
     if (!n.isSynthetic) card.appendChild(cardActions(n));
     card.appendChild(foldControl(n));
 
-    card.addEventListener('pointerdown', ev => ev.stopPropagation());   // don't start a pan
+    card.addEventListener('pointerdown', ev => {
+      ev.stopPropagation();                       // never start a canvas pan
+      if (isGraphMode()) startCardDrag(ev, n);
+    });
     card.addEventListener('click', ev => { ev.stopPropagation(); select(n.id); });
     title.addEventListener('dblclick', ev => { ev.stopPropagation(); startRename(n.id); });
 
@@ -344,6 +588,34 @@ const Tree = (() => {
     input.addEventListener('pointerdown', ev => ev.stopPropagation());
   }
 
+  /* In the graph, a card can be dragged where it makes sense and stays there:
+     the layout is a starting point, not an opinion to be argued with. */
+  function startCardDrag(ev, node) {
+    if (ev.button !== 0 || ev.target.closest('button, input, a')) return;
+
+    const startX = ev.clientX, startY = ev.clientY;
+    const origin = graphPos.get(node.id) || { x: node.x, y: node.y };
+    let dragged = false;
+
+    const move = move => {
+      const dx = (move.clientX - startX) / view.scale;
+      const dy = (move.clientY - startY) / view.scale;
+      if (Math.abs(dx) + Math.abs(dy) < 3 && !dragged) return;
+
+      dragged = true;
+      pinned.add(node.id);
+      graphPos.set(node.id, { x: origin.x + dx, y: origin.y + dy });
+      render();
+    };
+
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+  }
+
   /* ---------------- viewport: pan, zoom, fit ---------------- */
 
   function applyView() {
@@ -382,8 +654,8 @@ const Tree = (() => {
   }
 
   function centerOn(nodeId) {
-    if (!layoutRoot) return;
-    const target = flatten(layoutRoot).find(n => n.id === nodeId);
+    if (!layoutRoot || !layoutRoot.flat) return;
+    const target = layoutRoot.flat.find(n => n.id === nodeId);
     if (!target) return;
     const rect = svg.getBoundingClientRect();
     view.x = rect.width  / 2 - target.x * view.scale;
@@ -456,6 +728,17 @@ const Tree = (() => {
 
   function setShowActivity(on) { showActivity = !!on; render(); }
 
+  function setShowRefs(on) { showRefs = !!on; render(); }
+
+  /* Throws away every dragged position and lets the graph settle again. */
+  function relayoutGraph() {
+    pinned.clear();
+    graphPos.clear();
+    graphSignature = '';
+    render();
+    requestAnimationFrame(() => fit());
+  }
+
   /* ---------------- init ---------------- */
 
   function init(opts) {
@@ -479,9 +762,11 @@ const Tree = (() => {
 
   return {
     init, render, fit, zoom, centerOn, select, expandAll, setQuery, toggleCollapse,
-    setRoot, setShowActivity, startRename,
+    setRoot, setShowActivity, setShowRefs, relayoutGraph, startRename,
     get selectedId()   { return selectedId; },
     get rootId()       { return rootId; },
     get showActivity() { return showActivity; },
+    get showRefs()     { return showRefs; },
+    get isGraph()      { return isGraphMode(); },
   };
 })();

@@ -1269,3 +1269,104 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   margin: 7px 0 0;
 }
 .problem-goal { margin-top: 10px; flex-wrap: wrap; }
+
+/* ---------- References between topics ---------- */
+
+.ref-link {
+  fill: none;
+  stroke: var(--st-proficient);
+  stroke-width: 1.4px;
+  stroke-dasharray: 5 4;
+  opacity: .55;
+  transition: opacity .15s, stroke-width .15s;
+}
+.ref-link.is-hot { opacity: 1; stroke-width: 2.2px; }
+.ref-link.is-dimmed { opacity: .12; }
+
+.ref-arrow-head { fill: var(--st-proficient); opacity: .75; }
+.ref-arrow-head.is-hot { opacity: 1; }
+
+.ref-label {
+  font-size: 10px;
+  fill: var(--st-proficient);
+  paint-order: stroke;
+  stroke: var(--bg-elev);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+/* the graph moves cards around, so they need a grab affordance */
+.is-graph .card { cursor: grab; }
+.is-graph .card:active { cursor: grabbing; }
+
+/* references in the inspector */
+.ref-list { display: grid; gap: 4px; margin-bottom: 10px; }
+.ref-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  font-size: 12.5px;
+}
+.ref-row:hover { background: var(--bg-elev-2); border-color: var(--border); }
+.ref-dir {
+  font-size: 11px;
+  color: var(--st-proficient);
+  flex: none;
+  width: 16px;
+  text-align: center;
+}
+.ref-name {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ref-name:hover { color: var(--accent); }
+.ref-label-text { font-size: 11px; color: var(--text-faint); flex: none; max-width: 40%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ref-add { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+.ref-add select { grid-column: 1 / -1; }
+
+/* ---------- Company logos and the toggle ---------- */
+
+.app-logo {
+  width: 22px; height: 22px;
+  flex: none;
+  border-radius: 5px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: #fff;
+  overflow: hidden;
+}
+.app-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+.logo-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 9px;
+  align-items: center;
+  font-size: 12.5px;
+  margin-bottom: 18px;
+  cursor: pointer;
+}
+.logo-toggle input { width: auto; }
+.logo-toggle small {
+  grid-column: 2;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  line-height: 1.45;
+}

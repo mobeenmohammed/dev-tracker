@@ -72,6 +72,16 @@
   <section class="panel view" id="view-tree">
     <div class="canvas-wrap">
       <svg id="tree" role="img" aria-label="Learning tree">
+        <defs>
+          <marker id="ref-arrow" viewBox="0 0 10 10" refX="9" refY="5"
+                  markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" class="ref-arrow-head"/>
+          </marker>
+          <marker id="ref-arrow-hot" viewBox="0 0 10 10" refX="9" refY="5"
+                  markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" class="ref-arrow-head is-hot"/>
+          </marker>
+        </defs>
         <g id="viewport">
           <g id="links"></g>
           <g id="nodes"></g>
@@ -88,10 +98,12 @@
         <button class="btn btn-icon" data-zoom="out" title="Zoom out">−</button>
         <button class="btn btn-icon" data-zoom="fit" title="Fit to screen">⤢</button>
         <button class="btn btn-icon" id="expandAllBtn" title="Expand all branches">⊕</button>
+        <button class="btn btn-icon is-on" id="refsBtn" title="Show references between topics">&#8652;</button>
+        <button class="btn btn-icon" id="relayoutBtn" title="Lay the graph out again">&#10227;</button>
         <button class="btn btn-icon is-on" id="activityBtn" title="Show when each topic was last worked on">&#9201;</button>
       </div>
 
-      <p class="canvas-hint">Drag to pan · scroll to zoom · click a card to inspect · double-click a title to rename</p>
+      <p class="canvas-hint" id="canvasHint">Drag to pan · scroll to zoom · click a card to inspect · double-click a title to rename</p>
     </div>
   </section>
 
@@ -158,7 +170,8 @@
     <div class="stats-grid" id="problemStats"></div>
 
     <div class="stats-block">
-      <h2>Platform</h2>
+      <h2>Where from</h2>
+      <p class="muted">A site, a course, a book — anything you solve problems from.</p>
       <div id="problemSources" class="chip-row"></div>
     </div>
 
@@ -176,7 +189,7 @@
         <select name="source" aria-label="Platform"></select>
         <input type="text" name="problemId" placeholder="ID (1234A)" aria-label="Problem ID">
         <input type="text" name="title" placeholder="Problem title" aria-label="Title" required>
-        <input type="text" name="tags" placeholder="tags, comma separated" aria-label="Tags">
+        <input type="text" name="tags" placeholder="tags, comma separated" aria-label="Tags" list="tagOptions">
         <input type="number" name="difficulty" placeholder="Rating" aria-label="Rating" min="0" step="100">
         <input type="number" name="minutes" placeholder="Mins" aria-label="Minutes" min="0" step="5">
         <input type="date" name="solvedAt" aria-label="Solved on">
@@ -202,6 +215,13 @@
     </p>
 
     <div class="stats-grid" id="appStats"></div>
+
+    <label class="logo-toggle">
+      <input type="checkbox" id="appLogos">
+      <span>Show company logos</span>
+      <small>Off by default: fetching a logo tells that company's server you are
+        tracking them. Initials are used instead, and never leave this machine.</small>
+    </label>
     <div id="appDue" class="due-block" hidden></div>
 
     <div class="stats-block">
@@ -209,7 +229,7 @@
       <div id="appBoard" class="app-board"></div>
 
       <form id="appForm" class="app-form">
-        <input type="text" name="company" placeholder="Company" aria-label="Company" required>
+        <input type="text" name="company" placeholder="Company, or paste the posting URL" aria-label="Company or posting URL" required>
         <input type="text" name="role" placeholder="Role" aria-label="Role">
         <input type="text" name="location" placeholder="Location" aria-label="Location">
         <select name="stage" aria-label="Stage"></select>
@@ -264,6 +284,7 @@
 
 </main>
 
+<datalist id="tagOptions"></datalist>
 <input type="file" id="importFile" accept="application/json,.json" hidden>
 <input type="file" id="importSolvesFile" accept="application/json,.json" hidden>
 <div id="toast" class="toast" hidden></div>

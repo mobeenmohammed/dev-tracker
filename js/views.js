@@ -56,6 +56,7 @@ const Views = (() => {
     body.appendChild(inspDescription(node));
     body.appendChild(inspStatus(node));
     body.appendChild(inspChecklist(node));
+    body.appendChild(inspReferences(node));
     body.appendChild(inspProgress(node));
     body.appendChild(inspTime(node));
     body.appendChild(inspDetails(node));
@@ -252,6 +253,68 @@ const Views = (() => {
     });
     row.appendChild(del);
     return row;
+  }
+
+
+  /* --- references: what this topic relates to, across the tree --- */
+  function inspReferences(node) {
+    const { out, in: incoming } = Store.linksFor(node.id);
+    const sec = section(`References${out.length + incoming.length ? ` (${out.length + incoming.length})` : ''}`);
+
+    const list = document.createElement('div');
+    list.className = 'ref-list';
+
+    const row = (link, direction) => {
+      const otherId = direction === 'out' ? link.to : link.from;
+      const other = Store.byId(otherId);
+      if (!other) return null;
+
+      const el = document.createElement('div');
+      el.className = 'ref-row';
+      el.innerHTML = `
+        <span class="ref-dir" title="${direction === 'out' ? 'points at' : 'points here'}">${direction === 'out' ? '&rarr;' : '&larr;'}</span>
+        <button class="ref-name">${esc(other.name)}</button>
+        <span class="ref-label-text">${esc(link.label)}</span>
+        <button class="task-del" title="Remove this reference" aria-label="Remove reference">&times;</button>`;
+      el.querySelector('.ref-name').addEventListener('click', () => onNavigate(otherId));
+      el.querySelector('.task-del').addEventListener('click', () => {
+        Store.deleteLink(link.id);
+        onChanged();
+      });
+      return el;
+    };
+
+    out.forEach(l => { const r = row(l, 'out'); if (r) list.appendChild(r); });
+    incoming.forEach(l => { const r = row(l, 'in'); if (r) list.appendChild(r); });
+
+    if (!out.length && !incoming.length) {
+      const hint = document.createElement('p');
+      hint.className = 'muted check-empty';
+      hint.textContent = 'Nothing linked yet. A reference says two topics relate without either owning the other.';
+      list.appendChild(hint);
+    }
+    sec.appendChild(list);
+
+    /* Anything but itself is fair game — references cut across the hierarchy,
+       which is the whole point of having them. */
+    const form = document.createElement('form');
+    form.className = 'ref-add';
+    form.innerHTML = `
+      <select name="target" aria-label="Topic to reference">
+        <option value="">Link to…</option>
+        ${Store.state.nodes.filter(n => n.id !== node.id).map(n =>
+          `<option value="${esc(n.id)}">${'\u00a0\u00a0'.repeat(Store.depthOf(n.id))}${esc(n.name)}</option>`).join('')}
+      </select>
+      <input type="text" name="label" placeholder="How they relate (optional)" aria-label="Label">
+      <button class="btn btn-sm btn-primary" type="submit">Link</button>`;
+
+    form.addEventListener('submit', ev => {
+      ev.preventDefault();
+      const data = new FormData(form);
+      if (Store.addLink(node.id, data.get('target'), data.get('label'))) onChanged();
+    });
+    sec.appendChild(form);
+    return sec;
   }
 
   /* --- 5. progress, driven by whatever the checklist says --- */

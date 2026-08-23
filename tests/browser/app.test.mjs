@@ -77,7 +77,10 @@ check('All tab present', !!tabNamed('All'));
 check('C++ tab present', !!tabNamed('C++'));
 check('field tab shows progress', /\d+%/.test(tabNamed('C++').textContent), tabNamed('C++').textContent);
 check('All tab active on boot', tabNamed('All').classList.contains('is-active'));
-check('combined tree shows every field', treeNodes().length === 44, `${treeNodes().length}`);
+// All is a graph of every node, with no synthetic centre invented for it.
+check('the All view graphs every node', treeNodes().length === Store.state.nodes.length,
+      `${treeNodes().length} cards vs ${Store.state.nodes.length} nodes`);
+check('All is in graph mode', Tree.isGraph === true);
 
 /* ---------- 2. focusing one field ---------- */
 click(tabNamed('C++'));
@@ -150,7 +153,7 @@ check('inspector reports last worked', /last worked/.test($('#inspectorBody').te
 /* ---------- 3d. the inspector reads top to bottom in the right order ---------- */
 const headings = $$('#inspectorBody .insp-section h3').map(h => h.textContent.replace(/\s*\(.*/, ''));
 check('inspector section order', headings.join(' > ') ===
-      'What this is > Status > Resources & tasks > Progress > Time > Details > Actions',
+      'What this is > Status > Resources & tasks > References > Progress > Time > Details > Actions',
       headings.join(' > '));
 check('title comes first', $('#inspectorBody').firstElementChild.classList.contains('insp-head'));
 
@@ -230,6 +233,82 @@ click($('#activityBtn'));
 check('activity toggle hides card dates', $$('#nodes .card-when').length === 0);
 click($('#activityBtn'));
 check('and brings them back', $$('#nodes .card-when').length > 0);
+
+/* ---------- 3g. references and the graph ---------- */
+click(tabNamed('All'));
+check('All renders as a graph', Tree.isGraph === true);
+check('the canvas says so', $('.canvas-wrap').classList.contains('is-graph'));
+// The layout must not reshuffle every time something is repainted, or the
+// picture would be unreadable as a map.
+const positionsNow = () => $$('#nodes foreignObject')
+  .map(f => `${f.getAttribute('x')},${f.getAttribute('y')}`).join('|');
+const firstLayout = positionsNow();
+Tree.render();
+check('the graph is stable across renders', positionsNow() === firstLayout,
+      'positions moved on a repaint');
+check('the graph is spread out, not stacked',
+      new Set($$('#nodes foreignObject').map(f => f.getAttribute('x'))).size > 5);
+
+check('graph cards do not overlap', (() => {
+  const boxes = $$('#nodes foreignObject').map(f => ({
+    x: +f.getAttribute('x'), y: +f.getAttribute('y'),
+    w: +f.getAttribute('width'), h: +f.getAttribute('height'),
+  }));
+  for (let i = 0; i < boxes.length; i++)
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i], b = boxes[j];
+      if (a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y) return false;
+    }
+  return true;
+})(), 'two graph cards share space');
+
+// a reference between two topics in different fields
+clickNode('Probability & Statistics');
+check('references section present', /References/.test($('#inspectorBody').textContent));
+const refForm = $('.ref-add');
+refForm.querySelector('[name="target"]').value = 'hpc-roofline';
+refForm.querySelector('[name="label"]').value = 'used for modelling';
+refForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('reference created', Store.linksFor('math-prob').out.length === 1);
+check('it points where told', Store.linksFor('math-prob').out[0].to === 'hpc-roofline');
+check('the label is kept', Store.linksFor('math-prob').out[0].label === 'used for modelling');
+check('a dotted arrow is drawn', $$('#links .ref-link').length >= 1);
+check('the arrow is marked', !!$('#links .ref-link').getAttribute('marker-end'));
+check('the label shows for the selection', $$('#links .ref-label').length === 1);
+
+// it shows from the other end too
+clickNode('Roofline Model');
+check('the far end lists it', Store.linksFor('hpc-roofline').in.length === 1);
+check('shown as incoming', /References \(1\)/.test($('#inspectorBody').textContent));
+
+// no self-references, no duplicates
+check('a topic cannot reference itself', Store.addLink('math-prob', 'math-prob') === null);
+check('re-linking the same pair does not duplicate',
+      Store.addLink('math-prob', 'hpc-roofline', 'again') && Store.state.links.length === 1);
+check('but it relabels', Store.linksFor('math-prob').out[0].label === 'again');
+
+// toggling them off
+click($('#refsBtn'));
+check('references can be hidden', $$('#links .ref-link').length === 0);
+click($('#refsBtn'));
+check('and shown again', $$('#links .ref-link').length === 1);
+
+// deleting the topic at one end removes the reference
+const linkCount = Store.state.links.length;
+Store.addLink('math-prob', 'hpc-cuda', 'temporary');
+check('second reference added', Store.state.links.length === linkCount + 1);
+Store.deleteNode('hpc-cuda');
+Store.importJSON(Store.toJSON());
+check('a reference to a deleted topic is dropped', Store.state.links.length === linkCount);
+
+/* ---------- 3h. references survive the public/private split ---------- */
+Store.updateNode('math', { private: true });
+check('a reference into a private branch goes private',
+      JSON.parse(Store.toJSON()).links.length === 0, 'a private reference leaked');
+check('and is in the private file',
+      JSON.parse(Store.toPrivateJSON()).links.length === 1);
+Store.updateNode('math', { private: false });
+Tree.render();
 
 /* ---------- 4. starting a brand new field ---------- */
 click($('#addFieldTab'));
@@ -583,6 +662,40 @@ const anotes = $('#ad-notes');
 anotes.value = 'Spoke to the recruiter, assessment next week.';
 fire(anotes, 'blur');
 check('application notes saved', /recruiter/.test(Store.applications()[0].notes));
+
+// pasting a posting URL fills in what it knows
+const urlForm = $('#appForm');
+urlForm.querySelector('[name="company"]').value = 'https://jobs.lever.co/two-sigma/abc-123';
+urlForm.querySelector('[name="appliedAt"]').value = Store.todayISO();
+urlForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+const fromUrl = Store.applications().find(a => a.company === 'Two Sigma');
+check('a pasted URL becomes a company', !!fromUrl, Store.applications().map(a => a.company).join(', '));
+check('the board is recognised', fromUrl && fromUrl.source === 'Lever', fromUrl && fromUrl.source);
+check('the link is kept', fromUrl && /lever\.co/.test(fromUrl.url));
+
+// logos are initials by default and ask nothing of the network
+check('a monogram is drawn', $$('#appBoard .app-logo').length > 0);
+check('no image is loaded by default', $$('#appBoard .app-logo img').length === 0);
+check('the toggle is off', $('#appLogos').checked === false);
+check('and explains the trade-off', /tells that company/.test($('.logo-toggle').textContent));
+
+// mis-clicking a stage must not leave a mark on the tally
+const misRow = $$('#appBoard .app-row').find(r => /Example Corp/.test(r.textContent));
+const misSel = misRow.querySelector('.app-stage');
+const interviewsBefore = Store.applicationStats().interviews;
+misSel.value = 'offer';
+fire(misSel, 'change');
+misSel.value = 'interview';
+fire(misSel, 'change');
+misSel.value = 'applied';
+fire(misSel, 'change');
+check('stepping back through stages clears the interview tally',
+      Store.applicationStats().interviews === interviewsBefore - 1,
+      `${Store.applicationStats().interviews} vs ${interviewsBefore}`);
+check('and the stage is back', Store.applications().find(a => a.company === 'Example Corp').stage === 'applied');
+
+Store.deleteApplication(fromUrl.id);
+window.Applications.render();
 
 // THE guarantee
 const publicJson = Store.toJSON();

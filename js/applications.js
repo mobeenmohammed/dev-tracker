@@ -17,7 +17,43 @@ const Applications = (() => {
 
   const stageLabel = id => (Store.STAGE_BY_ID[id] || { label: id }).label;
 
+  const LOGO_KEY = 'learning-tree/app-logos';
+  const logosEnabled = () => {
+    try { return localStorage.getItem(LOGO_KEY) === 'on'; } catch { return false; }
+  };
+
+  /* Initials on a colour derived from the name: recognisable at a glance, and
+     it asks nothing of the network. Fetching a real logo would tell whoever
+     serves it which companies you are applying to, so that stays opt-in. */
+  function monogram(app) {
+    const letters = app.company.split(/\s+/).filter(Boolean).slice(0, 2)
+      .map(w => w[0].toUpperCase()).join('') || '?';
+
+    let hash = 0;
+    for (const ch of app.company) hash = (hash * 31 + ch.charCodeAt(0)) % 360;
+
+    const el = document.createElement('span');
+    el.className = 'app-logo';
+    el.style.background = `hsl(${hash} 45% 32%)`;
+    el.textContent = letters;
+
+    if (logosEnabled() && app.url) {
+      const domain = (Store.parsePosting(app.url) || {}).domain;
+      if (domain) {
+        const img = document.createElement('img');
+        img.src = `https://${domain}/favicon.ico`;
+        img.alt = '';
+        img.loading = 'lazy';
+        /* If the company has no favicon, the monogram simply stays. */
+        img.addEventListener('load', () => { el.textContent = ''; el.style.background = 'transparent'; el.appendChild(img); });
+        img.addEventListener('error', () => {});
+      }
+    }
+    return el;
+  }
+
   function render() {
+    wireLogoToggle();
     renderStats();
     renderDue();
     renderBoard();
@@ -92,6 +128,7 @@ const Applications = (() => {
     row.className = 'app-row' + (app.id === expandedId ? ' is-selected' : '');
     row.innerHTML = `
       <span class="app-company">
+        <span class="logo-slot"></span>
         <strong>${esc(app.company)}</strong>
         ${app.notes ? '<span class="note-flag" title="Has notes">&#9998;</span>' : ''}
       </span>
@@ -103,6 +140,7 @@ const Applications = (() => {
       </select>
       <span class="app-date">${esc(Store.relativeDay(app.appliedAt))}</span>`;
 
+    row.querySelector('.logo-slot').replaceWith(monogram(app));
     row.querySelector('.app-stage').addEventListener('click', ev => ev.stopPropagation());
     row.querySelector('.app-stage').addEventListener('change', ev => {
       Store.updateApplication(app.id, { stage: ev.target.value });
@@ -169,6 +207,22 @@ const Applications = (() => {
     };
     const save = patch => { Store.updateApplication(app.id, patch); flash(); };
 
+    /* A posting URL already contains the employer and the board it came from,
+       so pasting one fills in what it can without asking anything of anyone. */
+    panel.querySelector('#ad-url').addEventListener('change', ev => {
+      const parsed = Store.parsePosting(ev.target.value);
+      if (!parsed) return;
+
+      const patch = { url: ev.target.value };
+      if (!app.source && parsed.source) patch.source = parsed.source;
+      if (parsed.company && (!app.company || app.company === 'Unknown')) patch.company = parsed.company;
+
+      Store.updateApplication(app.id, patch);
+      if (patch.source) panel.querySelector('#ad-source').value = patch.source;
+      flash();
+      onChanged();
+    });
+
     const bind = (sel, key) => panel.querySelector(sel)
       .addEventListener('change', ev => save({ [key]: ev.target.value }));
     bind('#ad-role', 'role');
@@ -177,7 +231,6 @@ const Applications = (() => {
     bind('#ad-source', 'source');
     bind('#ad-next', 'nextAction');
     bind('#ad-due', 'nextDue');
-    bind('#ad-url', 'url');
 
     const notes = panel.querySelector('#ad-notes');
     notes.addEventListener('input', () => {
@@ -219,11 +272,20 @@ const Applications = (() => {
   function submitApplication() {
     const form = document.getElementById('appForm');
     const data = new FormData(form);
+
+    /* Company or a link: either is enough to start, and a link fills in the
+       rest of what it knows. */
+    const typed = String(data.get('company') || '').trim();
+    const fromUrl = Store.parsePosting(typed) || Store.parsePosting(data.get('url'));
+    const looksLikeUrl = /[./]/.test(typed) && Store.parsePosting(typed);
+
     const app = Store.addApplication({
-      company:  data.get('company'),
+      company:  looksLikeUrl ? (fromUrl.company || typed) : typed,
       role:     data.get('role'),
       location: data.get('location'),
       stage:    data.get('stage'),
+      source:   fromUrl ? fromUrl.source : '',
+      url:      looksLikeUrl ? typed : String(data.get('url') || ''),
       appliedAt: data.get('appliedAt') || Store.todayISO(),
     });
     if (!app) return false;
@@ -244,6 +306,17 @@ const Applications = (() => {
     }
     const date = document.querySelector('#appForm [name="appliedAt"]');
     if (date && !date.value) date.value = Store.todayISO();
+  }
+
+  function wireLogoToggle() {
+    const box = document.getElementById('appLogos');
+    if (!box || box.dataset.wired) return;
+    box.dataset.wired = '1';
+    box.checked = logosEnabled();
+    box.addEventListener('change', () => {
+      try { localStorage.setItem(LOGO_KEY, box.checked ? 'on' : 'off'); } catch { /* private mode */ }
+      render();
+    });
   }
 
   function init(opts) { onChanged = opts.onChanged || onChanged; }

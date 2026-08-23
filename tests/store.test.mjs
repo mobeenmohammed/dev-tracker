@@ -11,7 +11,7 @@ const seed = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/learning.json'), '
 
 const mem = new Map();
 const sandbox = {
-  console,
+  console, URL, URLSearchParams,
   localStorage: {
     getItem: k => (mem.has(k) ? mem.get(k) : null),
     setItem: (k, v) => mem.set(k, v),
@@ -374,6 +374,47 @@ check('focus survives export',       JSON.parse(Store.toJSON()).focus.length, St
 Store.importJSON(JSON.stringify({ nodes: [{ id: 'x', parentId: null, name: 'X' }] }));
 check('missing focus array defaults', Store.state.focus, []);
 check('and a day still summarises',   Store.focusSummary(Store.todayISO()), { total: 0, done: 0, ratio: 0 });
+
+/* --- a mis-clicked stage must leave no trace in the tallies --- */
+Store.importJSON(JSON.stringify({ nodes: [{ id: 'n', parentId: null, name: 'N' }] }));
+const mis = Store.addApplication({ company: 'Mistake Ltd', stage: 'applied' });
+check('starts with no interview',      Store.applicationStats().interviews, 0);
+
+Store.updateApplication(mis.id, { stage: 'interview' });
+check('an interview counts',           Store.applicationStats().interviews, 1);
+
+/* Putting it straight back must undo it, not record that it ever happened. */
+Store.updateApplication(mis.id, { stage: 'applied' });
+check('correcting it undoes the tally', Store.applicationStats().interviews, 0);
+check('and leaves no stray event',      Store.applications()[0].events.length, 1);
+
+/* A genuine progression, corrected later, still leaves the real history. */
+Store.updateApplication(mis.id, { stage: 'screen' });
+Store.addApplicationEvent(mis.id, { date: Store.todayISO(), stage: 'interview', note: 'phone screen went well' });
+check('a hand-written event is kept',   Store.applications()[0].events.length, 3);
+Store.updateApplication(mis.id, { stage: 'rejected' });
+check('an annotated interview still counts', Store.applicationStats().interviews, 1);
+check('rejection recorded',             Store.applications()[0].stage, 'rejected');
+
+/* Deleting the event that claimed it removes the claim. */
+const interviewEvent = Store.applications()[0].events.find(e => e.stage === 'interview');
+Store.deleteApplicationEvent(mis.id, interviewEvent.id);
+check('removing the event removes the tally', Store.applicationStats().interviews, 0);
+
+/* --- reading a posting URL, without asking the network anything --- */
+check('greenhouse',  Store.parsePosting('https://boards.greenhouse.io/stripe/jobs/12345'),
+      { company: 'Stripe', source: 'Greenhouse', domain: 'boards.greenhouse.io' });
+check('greenhouse job-boards host', Store.parsePosting('https://job-boards.greenhouse.io/acme/jobs/9').source, 'Greenhouse');
+check('lever',       Store.parsePosting('https://jobs.lever.co/two-sigma/abc').company, 'Two Sigma');
+check('workday',     Store.parsePosting('https://acme.wd3.myworkdayjobs.com/en-US/careers/job/x'),
+      { company: 'Acme', source: 'Workday', domain: 'acme.wd3.myworkdayjobs.com' });
+check('ashby',       Store.parsePosting('https://jobs.ashbyhq.com/openai/123').source, 'Ashby');
+check('linkedin has no company in the url',
+      Store.parsePosting('https://www.linkedin.com/jobs/view/4012').source, 'LinkedIn');
+check('a company site',  Store.parsePosting('https://careers.google.com/jobs/results/1').company, 'Google');
+check('a bare domain works too', Store.parsePosting('jane-street.com/join/1').company, 'Jane Street');
+check('nonsense is refused',  Store.parsePosting('not a url at all'), null);
+check('nothing is refused',   Store.parsePosting(''), null);
 
 /* --- a broken parent link re-roots instead of vanishing --- */
 Store.importJSON(JSON.stringify({

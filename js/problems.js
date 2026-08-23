@@ -203,8 +203,8 @@ const Problems = (() => {
       </div>
 
       <div class="field">
-        <span class="field-label">Tags <span class="muted">(comma separated)</span></span>
-        <input type="text" id="pd-tags" value="${esc(p.tags.join(', '))}">
+        <span class="field-label">Tags <span class="muted">(comma separated, suggestions as you type)</span></span>
+        <input type="text" id="pd-tags" list="tagOptions" value="${esc(p.tags.join(', '))}">
       </div>
 
       <textarea id="pd-notes" placeholder="What was the idea? What did you miss the first time?">${esc(p.notes)}</textarea>
@@ -319,7 +319,16 @@ const Problems = (() => {
     return true;
   }
 
+  /* The catalogue is a starting vocabulary, not a whitelist: it feeds the
+     suggestion list, and anything typed that is not in it still works. */
+  function fillTagOptions() {
+    const list = document.getElementById('tagOptions');
+    if (!list) return;
+    list.innerHTML = Store.knownTags().map(t => `<option value="${esc(t)}"></option>`).join('');
+  }
+
   function fillForm() {
+    fillTagOptions();
     const select = document.querySelector('#problemForm [name="source"]');
     const keep = select.value;
     select.innerHTML = Store.allSources()
@@ -345,6 +354,6 @@ const Problems = (() => {
     onChanged  = opts.onChanged  || onChanged;
   }
 
-  return { init, render, fillForm, submitProblem, importSolves,
+  return { init, render, fillForm, fillTagOptions, submitProblem, importSolves,
            get filter() { return filter; } };
 })();

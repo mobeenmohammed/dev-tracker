@@ -12,6 +12,7 @@
   let activeField = null;     // null = every field in one tree
   let selectedId  = null;
   let showActivity = true;    // applied to the tree once it has been initialised
+  let showRefs = true;
   let inspectorWidth = 340;   // px, dragged by the divider and remembered
 
   const VIEWS = ['tree', 'focus', 'problems', 'apps', 'list', 'stats'];
@@ -26,6 +27,7 @@
       localStorage.setItem(UI_KEY, JSON.stringify({
         currentView, activeField,
         showActivity: Tree.showActivity,
+        showRefs: Tree.showRefs,
         inspectorWidth,
       }));
     } catch { /* private mode */ }
@@ -43,6 +45,7 @@
     /* A field deleted since last visit falls back to the combined tree. */
     activeField = saved.activeField && Store.byId(saved.activeField) ? saved.activeField : null;
     showActivity = saved.showActivity !== false;
+    showRefs = saved.showRefs !== false;
     if (Number.isFinite(saved.inspectorWidth)) inspectorWidth = saved.inspectorWidth;
   }
 
@@ -269,6 +272,20 @@
     showView('tree');
     Tree.setRoot(activeField);
     renderTabs();
+    syncCanvasMode();
+  }
+
+  /* The All view is a graph and behaves differently enough to say so. */
+  function syncCanvasMode() {
+    const wrap = document.querySelector('.canvas-wrap');
+    const hint = document.getElementById('canvasHint');
+    if (!wrap || !hint) return;
+
+    wrap.classList.toggle('is-graph', Tree.isGraph);
+    hint.textContent = Tree.isGraph
+      ? 'Drag a card to place it · scroll to zoom · dotted arrows are references'
+      : 'Drag to pan · scroll to zoom · click a card to inspect · double-click a title to rename';
+    document.getElementById('relayoutBtn').disabled = !Tree.isGraph;
   }
 
   /* ---------------- data menu ---------------- */
@@ -581,7 +598,9 @@
     });
 
     Tree.setShowActivity(showActivity);
+    Tree.setShowRefs(showRefs);
     Tree.setRoot(activeField);
+    syncCanvasMode();
 
     document.querySelectorAll('.tab-fixed').forEach(tab =>
       tab.addEventListener('click', () => openFixedView(tab.dataset.view)));
@@ -594,6 +613,19 @@
       }));
 
     document.getElementById('expandAllBtn').addEventListener('click', () => Tree.expandAll());
+
+    const refsBtn = document.getElementById('refsBtn');
+    refsBtn.classList.toggle('is-on', Tree.showRefs);
+    refsBtn.addEventListener('click', () => {
+      Tree.setShowRefs(!Tree.showRefs);
+      refsBtn.classList.toggle('is-on', Tree.showRefs);
+      persistUi();
+    });
+
+    document.getElementById('relayoutBtn').addEventListener('click', () => {
+      Tree.relayoutGraph();
+      toast(Tree.isGraph ? 'Graph laid out again.' : 'Only the All view is a graph.');
+    });
 
     const activityBtn = document.getElementById('activityBtn');
     activityBtn.classList.toggle('is-on', Tree.showActivity);

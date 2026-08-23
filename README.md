@@ -31,13 +31,41 @@ with **Focus**, **List** and **Stats** always pinned on the right.
 - **Stats** — overall progress, a 26-week activity heatmap, a study streak,
   per-field progress bars, and the recent session feed.
 
-### The tree
+### The tree, and the graph
 
-A top-down tidy tree: the field sits at the top, its topics on the row below,
-and so on. Every topic is a card carrying its status, checklist count, when it
-was last worked on, time logged, and a progress bar. Hovering a card reveals
-four actions — rename in place, advance the status one step, add a sub-topic,
-or jump to logging time.
+A **field tab** shows that field as a top-down tidy tree: the field at the top,
+its topics on the row below, and so on. Hierarchy is the right shape for one
+subject.
+
+**All** is not a hierarchy — topics reference each other across fields — so it
+is a force-directed graph of every card, in the spirit of a knowledge graph.
+Parent-child edges pull, every pair pushes, references pull more weakly, and
+the result settles into clusters. Drag any card to place it and it stays put;
+the button on the canvas lays the whole thing out again.
+
+Positions are cached, so selecting a card or ticking something off never
+reshuffles the picture.
+
+### References
+
+The tree says where a topic *sits*; a reference says what it *relates to*.
+Probability relates to Randomised Algorithms without either owning the other,
+and only a graph can express that.
+
+Add one from the inspector's **References** section, optionally labelled. They
+are drawn as dashed, arrowed curves in their own colour so a relationship is
+never mistaken for containment, and both ends list the reference. The toggle on
+the canvas hides them.
+
+A reference is public only when both of its ends are: link a public topic to a
+private one and the reference itself goes to the private file.
+
+### The cards
+
+Every topic is a card carrying its status, checklist count, when it was last
+worked on, time logged, and a progress bar. Hovering reveals four actions —
+rename in place, advance the status one step, add a sub-topic, or jump to
+logging time.
 
 Drag to pan, scroll to zoom, click a card to inspect it, double-click its title
 to rename, and use the badge in the corner to fold a branch away.
@@ -111,6 +139,14 @@ makes it countable. A session is time spent; a solve is a thing done.
   "perceived": 4, "solvedAt": "2026-08-23", "minutes": 25, "notes": "" }
 ```
 
+Problems come from anywhere — a site, a university problem set, a textbook, an
+interview-prep list. The built-in sources cover the common platforms and you
+can add your own.
+
+Tags start from a built-in vocabulary spanning algorithms, data structures,
+graphs, mathematics and systems, offered as suggestions as you type. It is a
+starting point, not a whitelist: anything you type is a valid tag.
+
 Tags reach the tree through a **mapping table** you control: `dp` points at your
 Dynamic Programming topic, `graphs` at your graphs topic, and anything unmapped
 sits in a bucket you triage when you feel like it. The mapping is deliberately
@@ -164,6 +200,27 @@ UTC — an evening solve is not filed under tomorrow.
 The extension ships allowing `mobeenmohammed.github.io/dev-tracker/` and
 `localhost`; change `host_permissions` and `content_scripts.matches` in
 `extension/manifest.json` if the tracker lives elsewhere.
+
+### Applications
+
+A stage pipeline with a dated timeline per application, because the shape of a
+search is in its history rather than its current state.
+
+Changing the stage records a dated event, but **correcting a mis-click leaves
+no trace**: a change made the same day, on top of an automatic event nobody has
+annotated, rewrites that event rather than stacking another, and lands back to
+nothing if it returns where it started. So clicking *Interview* by accident and
+putting it back does not leave "reached interview" true forever. Anything you
+write a note on is never rewritten.
+
+Pasting a posting URL fills in what the URL already knows — Greenhouse, Lever,
+Ashby, Workday, SmartRecruiters, Workable, LinkedIn and company career sites
+are recognised — using nothing but pattern matching. No request is made.
+
+Company logos are **off by default and shown as initials**, because fetching a
+real logo would tell that company's server which companies you are tracking.
+The toggle says so plainly, and when enabled the icon is fetched from the
+company's own domain rather than a third-party logo service.
 
 ### Public and private data
 
@@ -263,6 +320,11 @@ drive the page in tests.
 | `tests/browser/boot.test.mjs` | Starting up from saved state, including a field deleted since the last visit. |
 | `tests/browser/styles.test.mjs` | That nothing marked `hidden` is still displayed — a real bug once left an invisible overlay covering the canvas. |
 | `tests/extension.test.mjs` | Mapping Codeforces submissions to solves: verdict filtering, one entry per problem, incremental syncing, and the fields the API omits. |
+
+LeetCode is not synced yet. It has a public GraphQL endpoint
+(`recentAcSubmissionList`) that returns roughly the twenty most recent accepted
+submissions, which is a far more durable path than scraping the page; full
+history needs an extension reading the signed-in account.
 
 
 
