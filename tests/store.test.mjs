@@ -750,6 +750,16 @@ Store.importJSON(JSON.stringify({
 check('a path follows the pipeline order',
       Store.applicationFlow().flows, [{ from: 'applied', to: 'offer', count: 1 }]);
 
+/* A stage set by hand that sits earlier than the events must not draw a
+   ribbon running backwards through the pipeline. */
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'n', parentId: null, name: 'N' }],
+  applications: [{ id: 'a', company: 'Reverted', stage: 'applied', events: [
+    { id: 'e1', date: '2026-02-01', stage: 'interview' }] }],
+}));
+check('a path never runs backwards',
+      Store.applicationFlow().flows, [{ from: 'applied', to: 'interview', count: 1 }]);
+
 check('no applications, no chart', (() => {
   Store.importJSON(JSON.stringify({ nodes: [{ id: 'n', parentId: null, name: 'N' }] }));
   const empty = Store.applicationFlow();

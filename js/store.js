@@ -1632,9 +1632,10 @@ const Store = (() => {
     state.applications.forEach(app => {
       /* The timeline is the truth; the current stage catches anything that
          never generated an event. */
-      const seen = [...new Set(app.events.map(e => e.stage))]
+      const seen = [...new Set([...app.events.map(e => e.stage), app.stage])]
+        /* Sorted by the pipeline, not by when anything was written, so a stage
+           set by hand cannot produce a ribbon running backwards. */
         .sort((a, b) => order.indexOf(a) - order.indexOf(b));
-      if (!seen.includes(app.stage)) seen.push(app.stage);
 
       seen.forEach(stage => totals.set(stage, (totals.get(stage) || 0) + 1));
 

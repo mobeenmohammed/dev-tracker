@@ -219,7 +219,13 @@
     panel.querySelector('.dt-title').textContent = key.label;
     body.replaceChildren(line('Checking…'));
 
+    const asked = PageKey.digestKey(key);
     const { record, syncedAt, collapsed } = await lookup(key);
+
+    /* LeetCode navigates without reloading, so the problem can change while
+       this is waiting; a late answer must not overwrite the new one. */
+    if (asked !== currentKey) return;
+
     if (collapsed) panel.classList.add('is-collapsed');
 
     body.replaceChildren();
