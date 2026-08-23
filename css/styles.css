@@ -1382,3 +1382,6 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .level-easy   { color: var(--st-mastered); }
 .level-medium { color: var(--st-learning); }
 .level-hard   { color: var(--danger); }
+
+/* the bulk-remove control sits with the heading it applies to */
+.stats-block h2 #purgeSource { margin-left: 12px; vertical-align: middle; font-weight: 400; }

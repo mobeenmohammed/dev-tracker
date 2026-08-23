@@ -104,9 +104,16 @@
       Solves are handed to the tracker the next time you open it, and are only
       dropped from the queue once it confirms it stored them.
     </p>
+    <p class="note">
+      <strong>Resetting the sync position</strong> only clears this extension's
+      memory of how far it has read, plus anything still queued. It deletes
+      nothing from the tracker — and the next check will read your Codeforces
+      history from the beginning again, which re-adds solves you deleted there.
+      To remove solves, use <em>Remove all from…</em> in the tracker's Problems tab.
+    </p>
     <div class="actions" style="margin-top:12px">
       <button id="backfill">Pull my last 20 LeetCode solves</button>
-      <button id="reset">Forget what has been synced</button>
+      <button id="reset">Reset sync position</button>
     </div>
   </fieldset>
 

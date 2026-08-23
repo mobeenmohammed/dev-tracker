@@ -188,6 +188,13 @@ hourly check has enormous headroom.
 If you do want the twenty currently visible, the options page has a button for
 it. Otherwise LeetCode starts clean.
 
+**Removing synced solves.** *Remove all from…* in the Problems tab clears
+everything one source contributed; it appears once you filter to that source.
+The extension's *Reset sync position* is a different thing entirely: it clears
+only the extension's memory of how far it has read, deletes nothing from the
+tracker, and makes the next Codeforces check re-read your whole history — which
+will re-add solves you had deleted.
+
 LeetCode's submission list carries no tags or difficulty, so each new problem
 is looked up once through the same public API and cached.
 

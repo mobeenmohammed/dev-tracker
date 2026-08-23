@@ -11,6 +11,7 @@ const Problems = (() => {
 
   let onNavigate = () => {};
   let onChanged  = () => {};
+  let onNotice   = () => {};
 
   let filter = { source: '', tag: '' };
   let expandedId = null;
@@ -130,6 +131,27 @@ const Problems = (() => {
     document.getElementById('problemCount').textContent =
       `${list.length} problem${list.length === 1 ? '' : 's'}` +
       (filter.tag ? ` tagged ${filter.tag}` : '');
+
+    /* Removing a whole source in one go is only offered while that source is
+       the one being looked at, so it cannot be hit by accident. */
+    const purge = document.getElementById('purgeSource');
+    const fromSource = filter.source ? Store.problemsMatching({ source: filter.source }) : [];
+    purge.hidden = !filter.source || fromSource.length === 0;
+    if (!purge.hidden) {
+      const label = Store.sourceLabel(filter.source);
+      purge.textContent = `Remove all ${fromSource.length} from ${label}`;
+      purge.onclick = () => {
+        if (!confirm(`Delete all ${fromSource.length} problems from ${label}?
+
+` +
+                     'This only clears them here. If the extension syncs that account again ' +
+                     'it will not re-add them, unless you also reset its sync position.')) return;
+        const removed = Store.deleteProblemsFrom(filter.source);
+        filter.source = '';
+        onChanged();
+        onNotice(`Removed ${removed} problem${removed === 1 ? '' : 's'}.`);
+      };
+    }
 
     if (!list.length) {
       box.innerHTML = '<p class="muted list-empty">Nothing here yet. Add a solve below.</p>';
@@ -367,6 +389,7 @@ const Problems = (() => {
   function init(opts) {
     onNavigate = opts.onNavigate || onNavigate;
     onChanged  = opts.onChanged  || onChanged;
+    onNotice   = opts.onNotice   || onNotice;
   }
 
   return { init, render, fillForm, fillTagOptions, submitProblem, importSolves,

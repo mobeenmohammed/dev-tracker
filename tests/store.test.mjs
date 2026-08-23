@@ -218,6 +218,16 @@ const bulk = Store.recordSolves([
 ]);
 check('bulk import counts new and known', bulk, { added: 1, updated: 1 });
 
+/* Everything one source brought in can be cleared in one go. */
+Store.recordSolve({ source: 'leetcode', problemId: 'lc-1', title: 'LC One' });
+Store.recordSolve({ source: 'leetcode', problemId: 'lc-2', title: 'LC Two' });
+const cfBefore = Store.problemsMatching({ source: 'codeforces' }).length;
+const lcCount = Store.problemsMatching({ source: 'leetcode' }).length;
+check('removing a source reports the count', Store.deleteProblemsFrom('leetcode'), lcCount);
+check('that source is empty',       Store.problemsMatching({ source: 'leetcode' }).length, 0);
+check('other sources are untouched', Store.problemsMatching({ source: 'codeforces' }).length, cfBefore);
+check('removing nothing is harmless', Store.deleteProblemsFrom('leetcode'), 0);
+
 /* Banded levels and numeric ratings are different claims. */
 Store.recordSolve({ source: 'leetcode', problemId: 'two-sum', title: 'Two Sum',
                     tags: ['array'], level: 'easy', solvedAt: '2026-05-04' });

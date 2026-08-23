@@ -652,6 +652,16 @@ const Store = (() => {
     persist();
   }
 
+  /* Clearing out everything one source contributed, for when a sync brought in
+     the wrong account or a fresh start is wanted. */
+  function deleteProblemsFrom(source) {
+    const before = state.problems.length;
+    state.problems = state.problems.filter(p => p.source !== source);
+    const removed = before - state.problems.length;
+    if (removed) persist();
+    return removed;
+  }
+
   /* The entry point an importer or browser extension writes through: the same
      solve arriving twice updates rather than duplicates. */
   function recordSolve(data) {
@@ -1159,7 +1169,7 @@ const Store = (() => {
     addNode, updateNode, deleteNode, addSession, deleteSession, updateProfile,
     addItem, toggleItem, updateItem, deleteItem, checklistOf,
     PROBLEM_SOURCES, LEVELS, allSources, addSource, sourceLabel,
-    addProblem, updateProblem, deleteProblem, recordSolve, recordSolves,
+    addProblem, updateProblem, deleteProblem, deleteProblemsFrom, recordSolve, recordSolves,
     problemsMatching, problemsForNode, problemStats, recentProblems,
     tagIndex, setTagMapping, nodeForTags,
     isPrivate, privateNodeIds,

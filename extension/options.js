@@ -73,7 +73,13 @@ $('backfill').addEventListener('click', async () => {
 });
 
 $('reset').addEventListener('click', async () => {
-  if (!confirm('Forget the sync position? The next check will read your whole history again.')) return;
+  const warning = [
+    'Reset the sync position?',
+    'Nothing is deleted from the tracker.',
+    'The next check reads your Codeforces history from the start again,',
+    'and LeetCode begins from now.',
+  ].join(' ');
+  if (!confirm(warning)) return;
   paint(await send({ type: 'reset-sync' }));
   setStatus('Sync position cleared.', 'good');
 });

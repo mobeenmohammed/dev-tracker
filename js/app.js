@@ -535,7 +535,10 @@
       }, location.origin === 'null' ? '*' : location.origin);
 
       if (result.added) {
-        toast(`${result.added} new solve${result.added === 1 ? '' : 's'} from Codeforces.`);
+        /* Name the sources that actually arrived, rather than assuming one. */
+        const from = [...new Set(data.solves.map(s => s && s.source).filter(Boolean))]
+          .map(Store.sourceLabel).join(' and ');
+        toast(`${result.added} new solve${result.added === 1 ? '' : 's'}` + (from ? ` from ${from}.` : '.'));
       }
     });
   }
@@ -651,6 +654,7 @@
     });
 
     Problems.init({
+      onNotice: toast,
       onNavigate: id => {
         const field = Store.domainOf(id);
         if (field && activeField) activeField = field.id;
