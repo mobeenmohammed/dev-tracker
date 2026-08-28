@@ -57,6 +57,7 @@ const Views = (() => {
     body.appendChild(inspStatus(node));
     body.appendChild(inspChecklist(node));
     body.appendChild(inspReferences(node));
+    body.appendChild(inspConnections(node));
     body.appendChild(inspProgress(node));
 
     const evidence = inspEvidence(node);
@@ -335,6 +336,85 @@ const Views = (() => {
       ev.preventDefault();
       const data = new FormData(form);
       if (Store.addLink(node.id, data.get('target'), data.get('label'), data.get('type'))) onChanged();
+    });
+    sec.appendChild(form);
+    return sec;
+  }
+
+  /* --- connections: branches shown inside this tree, and where this one
+         is shown in turn.
+
+         A reference says two topics relate. A connection is structural: the
+         whole branch is drawn inside the other tree, so a shared foundation
+         can be read in every field that rests on it without being copied
+         into any of them. --- */
+  function inspConnections(node) {
+    const { brings, appearsIn } = Store.connectionsFor(node.id);
+    const count = brings.length + appearsIn.length;
+    const sec = section(`Connections${count ? ` (${count})` : ''}`);
+
+    const list = document.createElement('div');
+    list.className = 'ref-list';
+
+    const row = (conn, direction) => {
+      const otherId = direction === 'brings' ? conn.from : conn.to;
+      const other = Store.byId(otherId);
+      if (!other) return null;
+
+      const field = Store.domainOf(otherId);
+      const where = field && field.id !== otherId ? ` (${field.name})` : '';
+      const phrase = direction === 'brings' ? 'shows here' : 'is shown under';
+
+      const el = document.createElement('div');
+      el.className = 'ref-row is-connect-row';
+      el.innerHTML = `
+        <span class="ref-dir" title="${direction === 'brings' ? 'brought into this topic' : 'this topic is drawn there'}">${direction === 'brings' ? '&darr;' : '&uarr;'}</span>
+        <span class="ref-type">${esc(phrase)}</span>
+        <button class="ref-name">${esc(other.name)}${esc(where)}</button>
+        <span class="ref-label-text">${esc(conn.label)}</span>
+        <button class="task-del" title="Remove this connection" aria-label="Remove connection">&times;</button>`;
+      el.querySelector('.ref-name').addEventListener('click', () => onNavigate(otherId));
+      el.querySelector('.task-del').addEventListener('click', () => {
+        Store.deleteConnection(conn.id);
+        onChanged();
+      });
+      return el;
+    };
+
+    brings.forEach(c => { const r = row(c, 'brings'); if (r) list.appendChild(r); });
+    appearsIn.forEach(c => { const r = row(c, 'appearsIn'); if (r) list.appendChild(r); });
+
+    if (!count) {
+      const hint = document.createElement('p');
+      hint.className = 'muted check-empty';
+      hint.textContent = 'Nothing connected yet. Connecting a topic draws its whole branch ' +
+        'inside this tree, while it goes on living where it is.';
+      list.appendChild(hint);
+    }
+    sec.appendChild(list);
+
+    /* Only topics that can actually be connected are offered — nothing that
+       would make the tree contain itself, and nothing already drawn below
+       this one — so a connection is never chosen and then silently refused. */
+    const candidates = Store.state.nodes.filter(n => Store.canConnect(n.id, node.id));
+
+    const form = document.createElement('form');
+    form.className = 'ref-add conn-add';
+    form.innerHTML = `
+      <select name="target" aria-label="Branch to show inside this topic">
+        <option value="">Show a branch here…</option>
+        ${candidates.map(n =>
+          `<option value="${esc(n.id)}">${'\u00a0\u00a0'.repeat(Store.depthOf(n.id))}${esc(n.name)}</option>`).join('')}
+      </select>
+      <input type="text" name="label" placeholder="Why (optional)" aria-label="Why they are connected">
+      <button class="btn btn-sm btn-primary" type="submit">Connect</button>`;
+
+    form.addEventListener('submit', ev => {
+      ev.preventDefault();
+      const data = new FormData(form);
+      const from = data.get('target');
+      if (!from) return;
+      if (Store.addConnection(from, node.id, data.get('label'))) onChanged();
     });
     sec.appendChild(form);
     return sec;

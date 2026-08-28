@@ -70,6 +70,46 @@ and leave Processes untouched, and the inspector says so:
 
 > You are working on this, but Processes is still not started.
 
+### Connections: one branch shown inside another tree
+
+A reference says two topics relate. A **connection** is structural: it draws a
+whole branch inside another tree.
+
+Linear Algebra lives under Mathematics, but Machine Learning rests on it just
+as much. Connect Linear Algebra into Machine Learning and the ML tree gains
+Linear Algebra with all of its sub-topics, drawn in the connection colour with
+a dashed outline and a line reading *from Mathematics*. Nothing is copied and
+nothing moves: it is still a child of Mathematics, still in the Mathematics
+tab, still one topic with one status and one history. You are looking at the
+same thing through two windows.
+
+Make one from the inspector's **Connections** section on the host topic
+(*Show a branch here…*), or read it from the other end — the borrowed topic
+lists the trees it is shown in. Both ends can remove it. On the canvas, the
+head of a borrowed branch carries two buttons: **↗** opens the topic in the
+tree it really lives in, and **✂** removes the connection.
+
+Borrowed cards deliberately offer no rename or add-sub-topic: editing another
+tree through a window is how trees get confusing. Clicking one selects the
+topic and the inspector does everything as usual.
+
+The rules that keep the picture finite and honest:
+
+- A topic cannot be shown inside itself, inside its own sub-topics, or
+  anywhere its branch already reaches — that would make the tree contain
+  itself. The dropdown only offers topics that pass.
+- Nor can it be brought into a tree where it is already drawn: that would put
+  two cards for one topic side by side and say nothing new.
+- Moving a topic can close a loop that did not exist when the connection was
+  made. The move wins and the connection is dropped, because the move was the
+  deliberate act.
+- A connection is public only when both ends are — like a reference, and for
+  the same reason: publishing it would name a private branch and say where it
+  is shown.
+
+In the **All** graph a connection pulls like parentage rather than like a
+reference, and is drawn as a dashed arrow in the connection colour.
+
 ### The cards
 
 Every topic is a card carrying its status, checklist count, when it was last
@@ -461,6 +501,13 @@ A node with `"parentId": null` is a top-level field. Sessions reference a node b
 ```json
 { "id": "s12", "nodeId": "hpc-roofline", "date": "2026-08-21",
   "minutes": 70, "note": "Plotted arithmetic intensity." }
+```
+
+A connection names the branch and the topic it is shown under, and nothing
+else — the branch itself is never duplicated into the host:
+
+```json
+{ "id": "c1", "from": "math-linalg", "to": "ml", "label": "the whole basis" }
 ```
 
 Focus tasks are stored per day, which is what makes the history possible:

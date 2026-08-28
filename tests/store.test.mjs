@@ -907,5 +907,105 @@ Store.importJSON(JSON.stringify({
 check('missing parent re-roots',     Store.roots().map(r => r.id), ['orphan']);
 check('session for a missing node dropped', Store.state.sessions.length, 0);
 
+/* --- connections: a branch shown inside another tree --- */
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'math',  parentId: null,   name: 'Maths' },
+    { id: 'linalg', parentId: 'math', name: 'Linear algebra' },
+    { id: 'decomp', parentId: 'linalg', name: 'Decompositions' },
+    { id: 'ml',    parentId: null,   name: 'Machine learning' },
+    { id: 'nets',  parentId: 'ml',   name: 'Neural nets' },
+  ],
+}));
+
+check('nothing connected to begin with', Store.state.connections.length, 0);
+check('linear algebra shows inside ML', !!Store.addConnection('linalg', 'ml'), true);
+check('the connection is readable from the host',
+      Store.connectedInto('ml').map(x => x.node.id), ['linalg']);
+check('and from the branch that was lent',
+      Store.connectionsFor('linalg').appearsIn.map(c => c.to), ['ml']);
+check('the host sees what it brings in',
+      Store.connectionsFor('ml').brings.map(c => c.from), ['linalg']);
+check('the branch has not moved',       Store.byId('linalg').parentId, 'math');
+check('and still belongs to its field',  Store.domainOf('linalg').id, 'math');
+
+/* the loop rules */
+check('a topic cannot be shown inside itself', Store.addConnection('ml', 'ml'), null);
+check('nor inside its own sub-topic',          Store.addConnection('math', 'linalg'), null);
+check('nor anywhere its branch already reaches',
+      Store.addConnection('ml', 'decomp'), null);
+/* The reverse is not a loop, only a pointless second card for one topic. */
+check('a sub-topic is not brought into its own parent',
+      Store.addConnection('decomp', 'linalg'), null);
+check('nor into anything it already sits under',
+      Store.addConnection('decomp', 'math'), null);
+check('and that is what the form asks before offering a topic',
+      [Store.canConnect('decomp', 'math'), Store.canConnect('nets', 'math')], [false, true]);
+check('re-connecting the same pair does not double it',
+      (Store.addConnection('linalg', 'ml'), Store.state.connections.length), 1);
+check('an unrelated pair is still allowed',
+      !!Store.addConnection('nets', 'decomp'), true);
+
+/* re-parenting can close a loop the connection did not have when it was made */
+Store.addNode({ parentId: null, name: 'Spare' });
+const spare = Store.roots().find(n => n.name === 'Spare');
+Store.addConnection('nets', spare.id);
+check('connected before the move',
+      Store.connectedInto(spare.id).map(x => x.node.id), ['nets']);
+Store.updateNode(spare.id, { parentId: 'nets' });
+check('moving the host inside the branch drops that connection',
+      Store.connectedInto(spare.id).length, 0);
+check('the other connections survive the move',
+      Store.state.connections.map(c => c.from + '->' + c.to).sort(),
+      ['linalg->ml', 'nets->decomp']);
+
+/* deleting either end takes the connection with it */
+Store.deleteNode('decomp');
+check('deleting an end removes the connection',
+      Store.state.connections.map(c => c.from + '->' + c.to), ['linalg->ml']);
+
+/* a file carrying a loop loads as a tree with the bad connection missing */
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'a', parentId: null, name: 'A' },
+    { id: 'b', parentId: 'a',  name: 'B' },
+    { id: 'c', parentId: null, name: 'C' },
+  ],
+  connections: [
+    { id: 'k1', from: 'a', to: 'c' },
+    { id: 'k2', from: 'c', to: 'b' },      // closes the loop: dropped
+    { id: 'k3', from: 'a', to: 'gone' },   // an end that does not exist
+    { id: 'k4', from: 'a', to: 'a' },      // itself
+    { id: 'k5', from: 'a', to: 'c' },      // the same pair twice
+  ],
+}));
+check('only the connections that hold up survive',
+      Store.state.connections.map(c => c.id), ['k1']);
+
+/* privacy: a connection naming a private branch is never published */
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'open',  parentId: null, name: 'Open' },
+    { id: 'quiet', parentId: null, name: 'Quiet', private: true },
+    { id: 'other', parentId: null, name: 'Other' },
+  ],
+  connections: [
+    { id: 'kp', from: 'quiet', to: 'open' },
+    { id: 'ko', from: 'other', to: 'open' },
+  ],
+}));
+check('the public snapshot keeps only the public connection',
+      JSON.parse(Store.toJSON()).connections.map(c => c.id), ['ko']);
+check('the private file keeps the private one',
+      JSON.parse(Store.toPrivateJSON()).connections.map(c => c.id), ['kp']);
+check('and the public snapshot never names the private branch',
+      Store.toJSON().includes('quiet'), false);
+
+/* merging the same file twice must not double the connections */
+const twice = Store.toPrivateJSON();
+Store.mergeJSON(twice);
+Store.mergeJSON(twice);
+check('merging is idempotent for connections', Store.state.connections.length, 2);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

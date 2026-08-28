@@ -49,5 +49,31 @@ const overlays = [...doc.querySelectorAll('[hidden]')].filter(el => display(el) 
 check('no hidden element is still displayed', overlays.length === 0,
       overlays.map(el => el.id || el.className).join(', '));
 
+/* A borrowed card has to be obviously not native to the tree it is drawn in,
+   so the difference has to survive into the computed style rather than living
+   only in the class name. */
+const probe = (cls) => {
+  const el = doc.createElement('div');
+  el.className = cls;
+  doc.body.appendChild(el);
+  const s = window.getComputedStyle(el);
+  return { border: s.borderStyle || s.borderTopStyle, background: s.backgroundColor || s.background };
+};
+const plain = probe('card');
+const lent  = probe('card is-borrowed');
+check('a borrowed card is outlined differently from a native one',
+      lent.border !== plain.border, `${plain.border} vs ${lent.border}`);
+/* jsdom resolves neither var() nor color-mix, so the tint is checked in the
+   stylesheet rather than in a computed colour that would always come back
+   transparent here. */
+check('and tinted in the connection colour',
+      /\.card\.is-borrowed\s*\{[^}]*background:[^}]*--connect/.test(css));
+
+/* The connection colour must exist in both themes, or one of them draws the
+   edges and the tint in nothing at all. */
+const themed = css.split('html[data-theme="light"]');
+check('connections have a colour in the dark theme', /--connect:\s*#/.test(themed[0]));
+check('and in the light theme', /--connect:\s*#/.test(themed[1] || ''));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

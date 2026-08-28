@@ -39,26 +39,59 @@ const Tree = (() => {
 
   /* ---------------- hierarchy ---------------- */
 
+  /* A topic's children are its real sub-topics plus any branch connected into
+     it. The connected branch is drawn in full, marked as borrowed, while the
+     topic it names goes on living where it really is — so one topic can be
+     read in two trees without either of them owning it.
+
+     The same topic can therefore appear more than once in a single tree, and
+     `id` is no longer unique within a render. `key` is: it carries the whole
+     path down to this instance, and anything that has to tell two drawings of
+     one topic apart uses it. */
   function buildHierarchy() {
-    const make = (node, depth) => {
+    /* `path` is every topic id from the root down to this one. A topic already
+       on that chain is not descended into again, so even a connection that
+       somehow slipped past the store's loop check draws a finite tree rather
+       than hanging the page. */
+    const make = (node, depth, path, key, borrowed, connection) => {
       const isCollapsed = collapsed.has(node.id);
-      const rawKids = node.id === ROOT_ID ? Store.roots() : Store.childrenOf(node.id);
+      const rawKids  = node.id === ROOT_ID ? Store.roots() : Store.childrenOf(node.id);
+      const brought  = node.id === ROOT_ID ? [] : Store.connectedInto(node.id);
+      const nextPath = new Set(path).add(node.id);
+
+      const kids   = rawKids.filter(k => !nextPath.has(k.id));
+      const grafts = brought.filter(b => !nextPath.has(b.node.id));
+      const home   = connection ? Store.domainOf(node.id) : null;
+
       return {
         id:          node.id,
+        key,
         name:        node.name,
         status:      node.status,
         isSynthetic: node.id === ROOT_ID,
         depth,
-        hiddenKids:  isCollapsed ? rawKids.length : 0,
-        children:    isCollapsed ? [] : rawKids.map(k => make(k, depth + 1)),
+        /* borrowed: drawn inside a connected branch, wherever in it.
+           graftRoot: the topic the connection actually names. */
+        borrowed:     !!borrowed,
+        graftRoot:    !!connection,
+        connectionId: connection ? connection.id : null,
+        originName:   home ? home.name : '',
+        hiddenKids:   isCollapsed ? kids.length + grafts.length : 0,
+        children:     isCollapsed ? [] : [
+          ...kids.map(k =>
+            make(k, depth + 1, nextPath, key + '/' + k.id, borrowed, null)),
+          ...grafts.map(b =>
+            make(b.node, depth + 1, nextPath, key + '/' + b.node.id, true, b.connection)),
+        ],
       };
     };
 
     const field = rootId ? Store.byId(rootId) : null;
-    if (field) return make(field, 0);
+    if (field) return make(field, 0, new Set(), field.id, false, null);
 
     const profile = Store.state.profile;
-    return make({ id: ROOT_ID, name: profile.name || 'Everything', status: 'mastered' }, 0);
+    return make({ id: ROOT_ID, name: profile.name || 'Everything', status: 'mastered' },
+                0, new Set(), ROOT_ID, false, null);
   }
 
   const isGraphMode = () => rootId === null;
@@ -81,8 +114,10 @@ const Tree = (() => {
     all.forEach(n => {
       const card = cardFor(n.depth);
       n.w = card.w;
-      n.h = card.h;
-      rowH[n.depth] = Math.max(rowH[n.depth] || 0, card.h);
+      /* The head of a connected branch carries an extra line saying where it
+         came from, so it needs the room for it. */
+      n.h = card.h + (n.graftRoot ? 14 : 0);
+      rowH[n.depth] = Math.max(rowH[n.depth] || 0, n.h);
     });
 
     const ys = [];
@@ -145,10 +180,15 @@ const Tree = (() => {
   function graphNodes() {
     return Store.state.nodes.map(n => ({
       id: n.id,
+      key: n.id,                  // the graph draws each topic exactly once
       name: n.name,
       status: n.status,
       depth: Store.depthOf(n.id),
       isSynthetic: false,
+      borrowed: false,
+      graftRoot: false,
+      connectionId: null,
+      originName: '',
       children: [],
       hiddenKids: 0,
     }));
@@ -258,9 +298,12 @@ const Tree = (() => {
       n.pinned = pinned.has(n.id);
     });
 
+    /* A connection is structural, so in the graph it pulls like parentage
+       rather than like a reference. */
     const edges = Store.state.nodes
       .filter(n => n.parentId)
-      .map(n => ({ a: n.parentId, b: n.id }));
+      .map(n => ({ a: n.parentId, b: n.id }))
+      .concat(Store.state.connections.map(c => ({ a: c.to, b: c.from, connect: true })));
     const refs = Store.state.links.map(l => ({ a: l.from, b: l.to }));
 
     const signature = signatureOf(nodes, edges.concat(refs));
@@ -303,12 +346,14 @@ const Tree = (() => {
   /* Nodes matching a search stay lit along with their ancestors. */
   function litSet(all) {
     if (!query) return null;
+    /* Keyed by instance, not by topic: a borrowed copy of a match lights its
+       own ancestors, not the ancestors of the original. */
     const parentOf = new Map();
-    all.forEach(n => n.children.forEach(c => parentOf.set(c.id, n)));
+    all.forEach(n => n.children.forEach(c => parentOf.set(c.key, n)));
     const lit = new Set();
     all.filter(n => matches(n.name)).forEach(n => {
       let cur = n;
-      while (cur) { lit.add(cur.id); cur = parentOf.get(cur.id); }
+      while (cur) { lit.add(cur.key); cur = parentOf.get(cur.key); }
     });
     return lit;
   }
@@ -320,13 +365,25 @@ const Tree = (() => {
     gNodes.replaceChildren();
 
     const { all, edges } = isGraphMode() ? renderGraph() : renderTree();
-    const byId = new Map(all.map(n => [n.id, n]));
-    const lit = litSet(all);
-    const isDim = n => lit && !lit.has(n.id);
 
-    edges.forEach(({ from, to }) => {
-      const path = el('path', { class: 'link' + (isDim(to) ? ' is-dimmed' : ''), d: linkPath(from, to) });
-      if (to.id === selectedId || from.id === selectedId) path.classList.add('is-hot');
+    /* References attach to the topic where it really lives, so where a topic
+       is drawn twice the original wins the lookup. */
+    const byId = new Map();
+    all.forEach(n => {
+      const held = byId.get(n.id);
+      if (!held || (held.borrowed && !n.borrowed)) byId.set(n.id, n);
+    });
+
+    const lit = litSet(all);
+    const isDim = n => lit && !lit.has(n.key);
+
+    edges.forEach(({ from, to, kind }) => {
+      const cls = ['link'];
+      if (kind === 'connect') cls.push('is-connect');
+      if (isDim(to)) cls.push('is-dimmed');
+      if (to.id === selectedId || from.id === selectedId) cls.push('is-hot');
+      const path = el('path', { class: cls.join(' '), d: linkPath(from, to) });
+      if (kind === 'connect') path.setAttribute('marker-end', 'url(#connect-arrow)');
       gLinks.appendChild(path);
     });
 
@@ -341,7 +398,9 @@ const Tree = (() => {
     const root = layout(buildHierarchy());
     const all = flatten(root);
     const edges = [];
-    all.forEach(parent => parent.children.forEach(child => edges.push({ from: parent, to: child })));
+    all.forEach(parent => parent.children.forEach(child => edges.push({
+      from: parent, to: child, kind: child.graftRoot ? 'connect' : 'child',
+    })));
     return { all, edges };
   }
 
@@ -352,7 +411,7 @@ const Tree = (() => {
     return {
       all: nodes,
       edges: edges
-        .map(e => ({ from: byId.get(e.a), to: byId.get(e.b) }))
+        .map(e => ({ from: byId.get(e.a), to: byId.get(e.b), kind: e.connect ? 'connect' : 'child' }))
         .filter(e => e.from && e.to),
     };
   }
@@ -421,6 +480,7 @@ const Tree = (() => {
     if (n.hiddenKids)        cls.push('has-hidden-kids');
     if (dim)                 cls.push('is-dimmed');
     if (matches(n.name))     cls.push('is-match');
+    if (n.borrowed)          cls.push('is-borrowed');
 
     const g = el('g', { class: cls.join(' ') });
     const fo = el('foreignObject', {
@@ -432,6 +492,11 @@ const Tree = (() => {
     if (n.id === selectedId) card.classList.add('is-selected');
     if (matches(n.name)) card.classList.add('is-match');
     if (!n.isSynthetic && Store.isPrivate(n.id)) card.classList.add('is-private');
+    /* A borrowed card must never read as a topic of this tree, so it is
+       tinted and outlined differently and the branch head says where it
+       came from. */
+    if (n.borrowed)  card.classList.add('is-borrowed');
+    if (n.graftRoot) card.classList.add('is-graft-root');
 
     card.appendChild(html('div', 'card-bar'));
 
@@ -440,6 +505,14 @@ const Tree = (() => {
     title.textContent = n.name;
     title.title = n.name;
     body.appendChild(title);
+
+    if (n.graftRoot) {
+      const from = html('div', 'card-origin');
+      from.textContent = '\u21B3 from ' + (n.originName || 'another tree');
+      from.title = 'Connected in from ' + (n.originName || 'another tree') +
+                   ' \u2014 it still lives there';
+      body.appendChild(from);
+    }
 
     const { worked, age } = activityOf(n);
     const meta = html('div', 'card-meta');
@@ -491,12 +564,16 @@ const Tree = (() => {
       if (isGraphMode()) startCardDrag(ev, n);
     });
     card.addEventListener('click', ev => { ev.stopPropagation(); select(n.id); });
-    title.addEventListener('dblclick', ev => { ev.stopPropagation(); startRename(n.id); });
+    /* Renaming happens where the topic lives, so two drawings of it can never
+       open two editors over the same name. */
+    if (!n.borrowed) {
+      title.addEventListener('dblclick', ev => { ev.stopPropagation(); startRename(n.id); });
+    }
 
     fo.appendChild(card);
     g.appendChild(fo);
 
-    if (editingId === n.id) queueMicrotask(() => openTitleEditor(card, n));
+    if (editingId === n.id && !n.borrowed) queueMicrotask(() => openTitleEditor(card, n));
     return g;
   }
 
@@ -507,9 +584,22 @@ const Tree = (() => {
       btn.textContent = label;
       btn.title = title;
       btn.dataset.act = act;
-      btn.addEventListener('click', ev => { ev.stopPropagation(); handleCardAction(act, n.id); });
+      btn.addEventListener('click', ev => { ev.stopPropagation(); handleCardAction(act, n); });
       return btn;
     };
+
+    /* A borrowed card is a view of a topic that lives elsewhere. Renaming or
+       growing it from here would be editing another tree through a window, so
+       the only thing on offer is going to where it really is. Everything else
+       is still reachable — clicking it opens the same inspector. */
+    if (n.borrowed) {
+      actions.appendChild(action('\u2197', 'origin', 'Open this topic where it lives'));
+      if (n.graftRoot) {
+        actions.appendChild(action('\u2702', 'disconnect', 'Remove this connection'));
+      }
+      return actions;
+    }
+
     actions.appendChild(action('\u270E', 'rename',  'Rename (or double-click the title)'));
     actions.appendChild(action('\u25B8', 'advance', 'Move to the next status'));
     actions.appendChild(action('\uFF0B', 'child',   'Add a sub-topic'));
@@ -532,7 +622,15 @@ const Tree = (() => {
     return badge;
   }
 
-  function handleCardAction(act, nodeId) {
+  function handleCardAction(act, n) {
+    const nodeId = n.id;
+
+    if (act === 'origin') { onAction('origin', nodeId); return; }
+    if (act === 'disconnect') {
+      Store.deleteConnection(n.connectionId);
+      onAction('disconnected', nodeId);
+      return;
+    }
     if (act === 'rename') { startRename(nodeId); return; }
 
     if (act === 'advance') {
@@ -654,8 +752,11 @@ const Tree = (() => {
   }
 
   function centerOn(nodeId) {
+    if (pendingFit) { cancelAnimationFrame(pendingFit); pendingFit = 0; }
     if (!layoutRoot || !layoutRoot.flat) return;
-    const target = layoutRoot.flat.find(n => n.id === nodeId);
+    /* Where a topic is drawn twice, centre on the one that lives here. */
+    const drawn = layoutRoot.flat.filter(n => n.id === nodeId);
+    const target = drawn.find(n => !n.borrowed) || drawn[0];
     if (!target) return;
     const rect = svg.getBoundingClientRect();
     view.x = rect.width  / 2 - target.x * view.scale;
@@ -720,10 +821,19 @@ const Tree = (() => {
 
   function setQuery(q) { query = (q || '').trim().toLowerCase(); render(); }
 
+  /* Changing tree fits the new one on the next frame. Centring on a topic in
+     the meantime must win, or following a connection into another field would
+     land on the topic and then immediately be pulled back to the whole tree. */
+  let pendingFit = 0;
+  function queueFit() {
+    if (pendingFit) cancelAnimationFrame(pendingFit);
+    pendingFit = requestAnimationFrame(() => { pendingFit = 0; fit(); });
+  }
+
   function setRoot(fieldId) {
     rootId = fieldId || null;
     render();
-    requestAnimationFrame(() => fit());
+    queueFit();
   }
 
   function setShowActivity(on) { showActivity = !!on; render(); }

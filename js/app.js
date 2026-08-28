@@ -285,8 +285,8 @@
 
     wrap.classList.toggle('is-graph', Tree.isGraph);
     hint.textContent = Tree.isGraph
-      ? 'Drag a card to place it · scroll to zoom · dotted arrows are references'
-      : 'Drag to pan · scroll to zoom · click a card to inspect · double-click a title to rename';
+      ? 'Drag a card to place it · scroll to zoom · dotted arrows are references, pink ones connections'
+      : 'Drag to pan · scroll to zoom · click a card to inspect · pink cards are connected in from another tree';
     document.getElementById('relayoutBtn').disabled = !Tree.isGraph;
   }
 
@@ -627,6 +627,20 @@
       /* Buttons on a card ask the app to do the work, so the tree stays a
          renderer and everything lands in one place. */
       onAction: (act, nodeId) => {
+        /* A borrowed card is a window onto a topic in another tree; this
+           opens that tree at it, which is the one thing the window is for. */
+        if (act === 'origin') {
+          const field = Store.domainOf(nodeId);
+          if (field) openField(field.id);
+          selectNode(nodeId, { center: true });
+          refresh();
+          return;
+        }
+        if (act === 'disconnected') {
+          refresh();
+          toast('Connection removed — the topic still lives where it was.');
+          return;
+        }
         if (act === 'child') {
           const child = Store.addNode({ parentId: nodeId, name: 'New topic' });
           refresh();

@@ -22,6 +22,10 @@
   --st-proficient: #a78bfa;
   --st-mastered:   #34d399;
 
+  /* Connections get a hue of their own, clear of every status and of the
+     purple used for references, so no edge is ever read as the wrong kind. */
+  --connect:       #f472b6;
+
   --radius:   10px;
   --radius-s: 7px;
   --shadow:   0 8px 28px rgba(0,0,0,.45);
@@ -47,6 +51,8 @@ html[data-theme="light"] {
   --st-practicing: #0ea5e9;
   --st-proficient: #7c3aed;
   --st-mastered:   #0f9d68;
+
+  --connect:       #c2185b;
 
   --shadow: 0 8px 24px rgba(31,41,55,.12);
 }
@@ -1296,6 +1302,50 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   stroke-width: 3px;
   stroke-linejoin: round;
   pointer-events: none;
+}
+
+/* ---------- Connected branches: one tree shown inside another ---------- */
+
+/* A connection is structural, so it is drawn as a solid edge like parentage
+   rather than as a dotted reference — but in its own colour, and arrowed, so
+   the eye can tell "this branch was brought in" from "this branch grew here". */
+.link.is-connect {
+  stroke: var(--connect);
+  stroke-width: 1.8px;
+  stroke-dasharray: 9 4;
+}
+.link.is-connect.is-hot { stroke: var(--connect); stroke-width: 2.4px; }
+.connect-arrow-head { fill: var(--connect); opacity: .85; }
+
+/* Borrowed cards read as visitors: outlined rather than filled, in the
+   connection colour, so a glance at a tree says which parts are natively
+   its own. */
+.card.is-borrowed {
+  background: color-mix(in srgb, var(--connect) 7%, var(--bg-elev));
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--connect) 45%, var(--border));
+}
+.card.is-borrowed:hover {
+  border-color: var(--connect);
+}
+.card.is-graft-root {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--connect) 65%, var(--border));
+  box-shadow: inset 3px 0 0 0 var(--connect);
+}
+/* a connection row in the inspector reads in the connection colour, so the
+   two kinds of relationship are never confused there either */
+.ref-row.is-connect-row .ref-dir,
+.ref-row.is-connect-row .ref-type { color: var(--connect); }
+
+.card-origin {
+  font-size: 9.5px;
+  line-height: 1.2;
+  color: var(--connect);
+  letter-spacing: .01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* the graph moves cards around, so they need a grab affordance */

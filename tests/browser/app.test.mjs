@@ -153,7 +153,7 @@ check('inspector reports last worked', /last worked/.test($('#inspectorBody').te
 /* ---------- 3d. the inspector reads top to bottom in the right order ---------- */
 const headings = $$('#inspectorBody .insp-section h3').map(h => h.textContent.replace(/\s*\(.*/, ''));
 check('inspector section order', headings.join(' > ') ===
-      'What this is > Status > Resources & tasks > References > Progress > Time > Journal > Details > Actions',
+      'What this is > Status > Resources & tasks > References > Connections > Progress > Time > Journal > Details > Actions',
       headings.join(' > '));
 check('title comes first', $('#inspectorBody').firstElementChild.classList.contains('insp-head'));
 
@@ -1011,6 +1011,112 @@ check('active view persisted', ui.currentView === 'stats', JSON.stringify(ui));
 check('active field matches the tree root', ui.activeField === Tree.rootId, JSON.stringify(ui));
 check('inspector width persisted', Number.isFinite(ui.inspectorWidth), JSON.stringify(ui));
 check('the new field still exists', !!Store.byId(newFieldId));
+
+/* ---------- 10. connections: a branch drawn inside another tree ---------- */
+
+/* Linear algebra lives under Maths. Connecting it into C++ should draw the
+   whole branch inside the C++ tree without moving it out of Maths. */
+Store.addConnection('math-linalg', 'cpp');
+click(tabNamed('C++'));
+
+const borrowed = $$('#nodes .node.is-borrowed');
+const graftRoot = $$('#nodes .card.is-graft-root');
+const connectEdges = () => $$('#links .link.is-connect');
+const linalgBranch = 1 + Store.descendantsOf('math-linalg').length;
+
+check('the connected branch is drawn in this tree',
+      borrowed.length === linalgBranch, `${borrowed.length} borrowed vs ${linalgBranch} in the branch`);
+check('its sub-topics came with it', !!nodeNamed('Matrix Decompositions'));
+check('the branch head is marked as the connection',
+      graftRoot.length === 1, `${graftRoot.length} graft roots`);
+check('and says where it came from',
+      /from Mathematics/.test($('#nodes .card-origin').textContent),
+      $('#nodes .card-origin') ? $('#nodes .card-origin').textContent : 'no origin line');
+check('the connection edge is drawn in its own style',
+      connectEdges().length === 1, `${connectEdges().length} connect edges`);
+check('the tree grew by exactly the borrowed branch',
+      treeNodes().length === 1 + Store.descendantsOf('cpp').length + linalgBranch,
+      `${treeNodes().length} cards`);
+
+/* The head of a borrowed branch is a taller card, so the row it sits in has to
+   make room for it rather than letting it run into the row below. */
+check('a grafted tree still has no overlapping cards',
+      (() => {
+        const boxes = $$('#nodes foreignObject').map(f => ({
+          x: +f.getAttribute('x'), y: +f.getAttribute('y'),
+          w: +f.getAttribute('width'), h: +f.getAttribute('height'),
+        }));
+        for (let i = 0; i < boxes.length; i++)
+          for (let j = i + 1; j < boxes.length; j++) {
+            const a = boxes[i], b = boxes[j];
+            if (a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y) return false;
+          }
+        return true;
+      })(), 'two cards share space');
+check('and the borrowed head is the taller card',
+      (() => {
+        const head = nodeNamed('Linear Algebra').querySelector('foreignObject');
+        const kid  = nodeNamed('Matrix Decompositions').querySelector('foreignObject');
+        return +head.getAttribute('height') > +kid.getAttribute('height');
+      })());
+
+/* The All graph is not a hierarchy, so a connection is an edge there rather
+   than a nesting — but still drawn as a connection, not as parentage. */
+click(tabNamed('All'));
+check('the graph draws the connection as its own kind of edge',
+      connectEdges().length === 1, `${connectEdges().length} connect edges in the graph`);
+check('and no card is borrowed in the graph, where each is drawn once',
+      $$('#nodes .node.is-borrowed').length === 0);
+check('the graph still draws every topic exactly once',
+      treeNodes().length === Store.state.nodes.length,
+      `${treeNodes().length} vs ${Store.state.nodes.length}`);
+click(tabNamed('C++'));
+
+/* Borrowed cards are a window, not a second copy: they do not offer to rename
+   or grow the topic, only to go to where it lives. */
+const borrowedActs = [...nodeNamed('Matrix Decompositions').querySelectorAll('.card-btn')]
+  .map(b => b.dataset.act);
+check('a borrowed card offers no rename', !borrowedActs.includes('rename'), borrowedActs.join(','));
+check('nor a sub-topic',                  !borrowedActs.includes('child'),  borrowedActs.join(','));
+check('but does offer its origin',        borrowedActs.includes('origin'),  borrowedActs.join(','));
+
+/* And the branch is still in its own tree, unchanged. */
+click(tabNamed('Mathematics'));
+check('the branch is still in its own tree', !!nodeNamed('Linear Algebra'));
+check('drawn there as its own, not borrowed',
+      !nodeNamed('Linear Algebra').classList.contains('is-borrowed'));
+check('its parent never changed', Store.byId('math-linalg').parentId === 'math',
+      String(Store.byId('math-linalg').parentId));
+
+/* Following a borrowed card lands on the topic in the tree it belongs to. */
+click(tabNamed('C++'));
+const originBtn = [...nodeNamed('Linear Algebra').querySelectorAll('.card-btn')]
+  .find(b => b.dataset.act === 'origin');
+click(originBtn);
+check('the origin button opens the field it lives in',
+      tabNamed('Mathematics').classList.contains('is-active'));
+check('with that topic selected', Tree.selectedId === 'math-linalg', String(Tree.selectedId));
+
+/* The inspector can make and break connections from either end. */
+window.Views.renderInspector('math-linalg');
+const connSection = $$('#inspectorBody .insp-section')
+  .find(s => /^Connections/.test(s.querySelector('h3').textContent));
+check('the inspector has a connections section', !!connSection);
+check('it reports where this branch is shown',
+      /is shown under/.test(connSection.textContent), connSection.textContent.slice(0, 120));
+check('a topic cannot offer to connect into itself',
+      ![...connSection.querySelectorAll('option')].some(o => o.value === 'math-linalg'));
+check('nor anything already drawn below it',
+      ![...connSection.querySelectorAll('option')].some(o => o.value === 'math-decomp'));
+
+click(connSection.querySelector('.task-del'));
+check('removing it from the inspector works', Store.state.connections.length === 0);
+check('and the topic is untouched', !!Store.byId('math-linalg'));
+
+click(tabNamed('C++'));
+check('the C++ tree is its own size again',
+      treeNodes().length === 1 + Store.descendantsOf('cpp').length, `${treeNodes().length} cards`);
+check('and no connection edge is left behind', connectEdges().length === 0);
 
 if (errors.length) {
   console.log('--- runtime errors ---');

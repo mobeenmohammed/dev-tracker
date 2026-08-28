@@ -180,6 +180,22 @@ const Store = (() => {
         seenLinks.add(key);
         return true;
       });
+    /* Connections are admitted one at a time and each is checked against the
+       ones already accepted, so a file carrying a loop loads as a tree with
+       the offending connection missing rather than as a tree that hangs. */
+    const connections = [];
+    const seenConnections = new Set();
+    (Array.isArray(raw.connections) ? raw.connections : [])
+      .map(normalizeConnection)
+      .forEach(c => {
+        const key = c.from + '->' + c.to;
+        if (c.from === c.to || !ids.has(c.from) || !ids.has(c.to)) return;
+        if (seenConnections.has(key)) return;
+        if (graftReaches(nodes, connections, c.from, c.to)) return;
+        seenConnections.add(key);
+        connections.push(c);
+      });
+
     const applications = (Array.isArray(raw.applications) ? raw.applications : [])
       .map(normalizeApplication)
       .filter(a => a.company);
@@ -204,6 +220,7 @@ const Store = (() => {
       problems,
       applications,
       links,
+      connections,
       journal,
       goals,
       projects,
@@ -423,6 +440,11 @@ const Store = (() => {
       throw new Error('That move would put the branch inside itself.');
     }
     Object.assign(node, patch, { updatedAt: todayISO() });
+    /* Moving a branch can put a connected topic inside the very branch it was
+       borrowing, which the tree cannot draw. The offending connection is
+       dropped rather than the move being refused: the person moved the topic
+       deliberately, and a connection is the cheaper thing to make again. */
+    if ('parentId' in patch) pruneLoopingConnections();
     persist();
     return node;
   }
@@ -439,6 +461,7 @@ const Store = (() => {
     state.sessions = state.sessions.filter(s => !doomed.has(s.nodeId));
     state.journal  = state.journal.filter(e => !doomed.has(e.nodeId));
     state.links    = state.links.filter(l => !doomed.has(l.from) && !doomed.has(l.to));
+    state.connections = state.connections.filter(c => !doomed.has(c.from) && !doomed.has(c.to));
 
     /* These outlive the topic, so they lose the link rather than the record. */
     state.problems.forEach(p => { if (doomed.has(p.nodeId)) p.nodeId = null; });
@@ -711,6 +734,120 @@ const Store = (() => {
                                 incoming: state.links.filter(l => l.to === nodeId) };
     return [...new Set([...out.map(l => l.to), ...incoming.map(l => l.from)])];
   };
+
+  /* ---------------- connections: one branch shown inside another ----------
+
+     A reference says two topics relate. A connection is stronger: it says
+     "wherever you look at B, this whole branch A belongs there too". A is
+     drawn inside B's tree, with its own sub-topics, while still living where
+     it really is. Nothing is copied and nothing moves — the same topic is
+     simply visible in two places, which is what makes it possible to keep
+     one tree per field and still see the parts that genuinely span them. */
+
+  function normalizeConnection(c) {
+    return {
+      id:    String(c.id || uid('c')),
+      from:  String(c.from),          // the branch being shown
+      to:    String(c.to),            // the topic it is shown under
+      label: typeof c.label === 'string' ? c.label.trim() : '',
+    };
+  }
+
+  /* Expanding a topic follows its real children *and* the branches connected
+     into it, so a connection can close a loop that parentage alone never
+     could. This walks that combined shape and answers "can I get from here to
+     there", which is exactly the question a new connection has to pass. */
+  function graftReaches(nodes, connections, startId, targetId) {
+    const kids = new Map();
+    nodes.forEach(n => {
+      if (!n.parentId) return;
+      if (!kids.has(n.parentId)) kids.set(n.parentId, []);
+      kids.get(n.parentId).push(n.id);
+    });
+    const brought = new Map();
+    connections.forEach(c => {
+      if (!brought.has(c.to)) brought.set(c.to, []);
+      brought.get(c.to).push(c.from);
+    });
+
+    const seen = new Set();
+    const stack = [startId];
+    while (stack.length) {
+      const id = stack.pop();
+      if (id === targetId) return true;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      (kids.get(id) || []).forEach(x => stack.push(x));
+      (brought.get(id) || []).forEach(x => stack.push(x));
+    }
+    return false;
+  }
+
+  /* True when showing `from` under `to` would make the tree contain itself. */
+  const wouldLoop = (from, to) =>
+    from === to || graftReaches(state.nodes, state.connections, from, to);
+
+  /* True when `from` is already drawn somewhere below `to` — as a real
+     sub-topic or through a connection already made. Bringing it in again
+     would put two cards for one topic in the same tree and say nothing new. */
+  const alreadyShownIn = (from, to) =>
+    from !== to && graftReaches(state.nodes, state.connections, to, from);
+
+  /* The one question the inspector and the store both need to ask. */
+  const canConnect = (from, to) =>
+    !!from && !!to && from !== to && !wouldLoop(from, to) && !alreadyShownIn(from, to);
+
+  function addConnection(from, to, label = '') {
+    if (!from || !to || from === to) return null;
+    if (!byId(from) || !byId(to)) return null;
+    /* Re-connecting an existing pair updates its note rather than doubling. */
+    const existing = state.connections.find(c => c.from === from && c.to === to);
+    if (existing) {
+      if (label) existing.label = String(label).trim();
+      persist();
+      return existing;
+    }
+    if (!canConnect(from, to)) return null;
+
+    const conn = normalizeConnection({ id: uid('c'), from, to, label });
+    state.connections.push(conn);
+    persist();
+    return conn;
+  }
+
+  function deleteConnection(id) {
+    state.connections = state.connections.filter(c => c.id !== id);
+    persist();
+  }
+
+  /* Re-parenting can close a loop that a connection did not have when it was
+     made, so they are re-checked whenever the shape of the tree moves. The
+     ones that survive are kept in order, so an older connection outlives a
+     newer one that conflicts with it. */
+  function pruneLoopingConnections() {
+    const kept = [];
+    state.connections.forEach(c => {
+      if (!byId(c.from) || !byId(c.to) || c.from === c.to) return;
+      if (graftReaches(state.nodes, kept, c.from, c.to)) return;
+      kept.push(c);
+    });
+    const dropped = state.connections.length - kept.length;
+    state.connections = kept;
+    return dropped;
+  }
+
+  /* Read from one topic's side: what it borrows, and where it is lent out. */
+  const connectionsFor = nodeId => ({
+    brings:    state.connections.filter(c => c.to === nodeId),
+    appearsIn: state.connections.filter(c => c.from === nodeId),
+  });
+
+  /* The branches to draw underneath this topic, in the order they were added. */
+  const connectedInto = nodeId =>
+    state.connections
+      .filter(c => c.to === nodeId)
+      .map(c => ({ connection: c, node: byId(c.from) }))
+      .filter(x => x.node);
 
   /* Something being learned whose prerequisites have not been started is
      worth saying out loud — it is the most common way study goes sideways. */
@@ -1760,25 +1897,29 @@ const Store = (() => {
       /* A reference is only public when both ends are. */
       links: state.links.filter(l =>
         (priv.has(l.from) || priv.has(l.to)) === wantPrivate),
+      /* And so is a connection: publishing one would name a private branch
+         and say where it is shown, which is the same leak by another route. */
+      connections: state.connections.filter(c =>
+        (priv.has(c.from) || priv.has(c.to)) === wantPrivate),
       /* Applications only ever exist in the private half. */
       applications: wantPrivate ? state.applications : [],
     };
   }
 
   function toJSON() {
-    const { nodes, sessions, focus, problems, links, journal, goals, projects } = partition(false);
+    const { nodes, sessions, focus, problems, links, connections, journal, goals, projects } = partition(false);
     return JSON.stringify({
       version: state.version, updatedAt: state.updatedAt, profile: state.profile,
-      nodes, links, sessions, focus, problems, journal, goals, projects,
+      nodes, links, connections, sessions, focus, problems, journal, goals, projects,
       tagMap: state.tagMap, sources: state.sources,
     }, null, 2);
   }
 
   function toPrivateJSON() {
-    const { nodes, sessions, focus, problems, applications, links, journal, projects } = partition(true);
+    const { nodes, sessions, focus, problems, applications, links, connections, journal, projects } = partition(true);
     return JSON.stringify({
       version: state.version, updatedAt: state.updatedAt, private: true,
-      nodes, links, sessions, focus, problems, journal, projects, applications,
+      nodes, links, connections, sessions, focus, problems, journal, projects, applications,
     }, null, 2);
   }
 
@@ -1812,6 +1953,7 @@ const Store = (() => {
     const haveProblems = new Set(state.problems.map(x => x.id));
     const haveApps     = new Set(state.applications.map(x => x.id));
     const haveLinks    = new Set(state.links.map(x => x.id));
+    const haveConns    = new Set(state.connections.map(x => x.id));
     const haveJournal  = new Set(state.journal.map(x => x.id));
     const haveGoals    = new Set(state.goals.map(x => x.id));
     const haveProjects = new Set(state.projects.map(x => x.id));
@@ -1825,6 +1967,8 @@ const Store = (() => {
       problems: [...state.problems, ...(parsed.problems || []).filter(x => !haveProblems.has(String(x.id)))],
       applications: [...state.applications, ...(parsed.applications || []).filter(x => !haveApps.has(String(x.id)))],
       links:    [...state.links, ...(parsed.links || []).filter(x => !haveLinks.has(String(x.id)))],
+      connections: [...state.connections,
+        ...(parsed.connections || []).filter(x => !haveConns.has(String(x.id)))],
       journal:  [...state.journal, ...(parsed.journal || []).filter(x => !haveJournal.has(String(x.id)))],
       goals:    [...state.goals, ...(parsed.goals || []).filter(x => !haveGoals.has(String(x.id)))],
       projects: [...state.projects, ...(parsed.projects || []).filter(x => !haveProjects.has(String(x.id)))],
@@ -1880,6 +2024,7 @@ const Store = (() => {
     tagIndex, setTagMapping, nodeForTags,
     isPrivate, privateNodeIds,
     addLink, updateLink, deleteLink, linksFor, relatedTo, LINK_TYPES, prerequisiteWarnings,
+    addConnection, deleteConnection, connectionsFor, connectedInto, canConnect,
     TAG_CATALOGUE, catalogueTags, knownTags,
     APP_STAGES, STAGE_BY_ID, applications, addApplication, updateApplication,
     deleteApplication, addApplicationEvent, deleteApplicationEvent, applicationStats, applicationFlow,
