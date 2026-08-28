@@ -72,7 +72,8 @@ const fieldTabs = () => $$('#fieldTabs .tab');
 const tabNamed  = name => fieldTabs().find(t => t.textContent.includes(name));
 
 /* ---------- 1. tab bar ---------- */
-check('tab per field plus All and +', fieldTabs().length === 6, `${fieldTabs().length} tabs`);
+// All, +, one per field, and the picker
+check('tab per field plus All, + and the picker', fieldTabs().length === 7, `${fieldTabs().length} tabs`);
 check('All tab present', !!tabNamed('All'));
 check('C++ tab present', !!tabNamed('C++'));
 check('field tab shows progress', /\d+%/.test(tabNamed('C++').textContent), tabNamed('C++').textContent);
@@ -1117,6 +1118,83 @@ click(tabNamed('C++'));
 check('the C++ tree is its own size again',
       treeNodes().length === 1 + Store.descendantsOf('cpp').length, `${treeNodes().length} cards`);
 check('and no connection edge is left behind', connectEdges().length === 0);
+
+/* ---------- 11. many fields stay navigable ---------- */
+
+/* The complaint this answers: with enough fields the bar scrolled as a whole,
+   so All, + and every fixed view were pushed off the right and reaching any of
+   them meant scrolling sideways first. */
+const manyBefore = Store.roots().length;
+'abcdefghijklmnop'.split('').forEach(n => Store.addNode({ parentId: null, name: 'Field ' + n }));
+click(tabNamed('All'));                       // re-renders the bar
+
+check('the fields really did grow', Store.roots().length === manyBefore + 16,
+      String(Store.roots().length));
+
+const scroller = $('#fieldTabsScroll');
+
+check('only the field tabs sit in the scrolling strip',
+      scroller.querySelectorAll('.tab').length === Store.roots().length,
+      `${scroller.querySelectorAll('.tab').length} in the strip vs ${Store.roots().length} fields`);
+check('All is pinned outside it',      !scroller.contains(tabNamed('All')));
+check('the new-field button too',      !scroller.contains($('#addFieldTab')));
+check('and the picker',                !scroller.contains($('#fieldPickerBtn')));
+check('the fixed views are outside it entirely',
+      $$('.tabs-fixed .tab').every(t => !scroller.contains(t)));
+check('the picker says how many fields there are',
+      $('#fieldPickerCount').textContent === Store.roots().length + ' fields',
+      $('#fieldPickerCount').textContent);
+
+/* The picker reaches any field without scrolling anything. */
+click($('#fieldPickerBtn'));
+check('the picker opens', !$('#fieldPicker').hidden);
+check('it lists every field plus All',
+      $$('#fieldPickerList .picker-row').length === Store.roots().length + 1,
+      `${$$('#fieldPickerList .picker-row').length} rows`);
+check('it drops below the bar rather than over the fixed views',
+      !$('.tabs-fixed').contains($('#fieldPicker')));
+check('at most one row reads as the field in focus',
+      $$('#fieldPickerList .picker-row.is-open').length <= 1);
+
+const pickerSearch = $('#fieldPickerSearch');
+pickerSearch.value = 'Field k';
+fire(pickerSearch, 'input');
+check('typing filters it down',
+      $$('#fieldPickerList .picker-row').length === 1,
+      `${$$('#fieldPickerList .picker-row').length} rows for "Field k"`);
+check('to the one that matches',
+      /Field k/.test($('#fieldPickerList .picker-row').textContent),
+      $('#fieldPickerList .picker-row').textContent);
+
+key(pickerSearch, 'Enter');
+check('Enter opens it', Tree.rootId === Store.roots().find(f => f.name === 'Field k').id,
+      String(Tree.rootId));
+check('and the picker closes behind it', $('#fieldPicker').hidden);
+check('its tab is the active one', tabNamed('Field k').classList.contains('is-active'));
+
+/* Arrow keys move a cursor through the list. */
+click($('#fieldPickerBtn'));
+const firstCursor = $('#fieldPickerList .picker-row.is-cursor').textContent;
+key($('#fieldPickerSearch'), 'ArrowDown');
+check('arrow keys move the cursor',
+      $('#fieldPickerList .picker-row.is-cursor').textContent !== firstCursor, firstCursor);
+key($('#fieldPickerSearch'), 'Escape');
+check('Escape closes it', $('#fieldPicker').hidden);
+
+/* A new field can be started from the picker as well as from the bar. */
+click($('#fieldPickerBtn'));
+click($('#fieldPickerNew'));
+check('the picker closes to name a new field', $('#fieldPicker').hidden);
+check('and hands over the inline name box', !!$('.tab-input'));
+key($('.tab-input'), 'Escape');
+
+/* Clicking a field far along the strip still opens it. */
+const lastField = Store.roots()[Store.roots().length - 1];
+click(tabNamed(lastField.name));
+check('a field at the far end of the strip opens',
+      Tree.rootId === lastField.id, String(Tree.rootId));
+check('and its tab is marked active',
+      tabNamed(lastField.name).classList.contains('is-active'));
 
 if (errors.length) {
   console.log('--- runtime errors ---');

@@ -48,7 +48,24 @@
 </header>
 
 <nav class="tabbar" role="tablist" aria-label="Fields and views">
-  <div class="tabs-fields" id="fieldTabs"><!-- built from the fields in the data --></div>
+  <!-- All and + are pinned so they never scroll away; only the field tabs
+       themselves scroll, and the picker reaches any field without scrolling. -->
+  <div class="tabs-fields" id="fieldTabs">
+    <div class="tabs-pinned" id="fieldTabsLead"><!-- All, and + --></div>
+    <div class="tabs-strip" id="fieldStrip">
+      <div class="tabs-scroll" id="fieldTabsScroll"><!-- one tab per field --></div>
+    </div>
+    <div class="tabs-pinned tabs-more">
+      <button id="fieldPickerBtn" class="tab tab-picker" aria-haspopup="dialog" aria-expanded="false"
+              title="Go to any field (g)"><span id="fieldPickerCount">fields</span> <span class="caret">&#8964;</span></button>
+      <div id="fieldPicker" class="field-picker" role="dialog" aria-label="Go to a field" hidden>
+        <input id="fieldPickerSearch" type="search" placeholder="Go to a field…" autocomplete="off"
+               aria-label="Filter fields" aria-controls="fieldPickerList">
+        <div id="fieldPickerList" class="picker-list" role="listbox" aria-label="Fields"></div>
+        <button id="fieldPickerNew" class="picker-new">+ New field</button>
+      </div>
+    </div>
+  </div>
   <div class="tabs-fixed">
     <button class="tab tab-fixed" data-view="focus" role="tab">Focus</button>
     <button class="tab tab-fixed" data-view="problems" role="tab">Problems</button>

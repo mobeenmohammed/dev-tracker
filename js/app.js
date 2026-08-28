@@ -179,10 +179,19 @@
 
   /* ---------------- tab bar ---------------- */
 
-  /* The tab bar carries one tab per field plus "All", and the two fixed views.
-     activeField is remembered so the app reopens where it was left. */
+  /* The tab bar carries one tab per field plus "All", and the fixed views.
+     activeField is remembered so the app reopens where it was left.
+
+     Only the field tabs scroll. "All", the new-field button and the picker are
+     pinned either side of them, and the fixed views are pinned at the far end,
+     so no amount of fields can push any of them off the screen — which is what
+     used to happen once there were more fields than the bar was wide. */
+  let scrolledTo;                 // the field the strip was last scrolled to
+
   function renderTabs() {
-    const strip = document.getElementById('fieldTabs');
+    const lead   = document.getElementById('fieldTabsLead');
+    const strip  = document.getElementById('fieldTabsScroll');
+    lead.replaceChildren();
     strip.replaceChildren();
 
     const tab = (label, { fieldId = null, isAll = false } = {}) => {
@@ -211,23 +220,147 @@
       return btn;
     };
 
-    strip.appendChild(tab('All', { isAll: true }));
-    Store.roots().forEach(field => strip.appendChild(tab(field.name, { fieldId: field.id })));
+    lead.appendChild(tab('All', { isAll: true }));
 
     const add = document.createElement('button');
     add.className = 'tab tab-add';
     add.id = 'addFieldTab';
     add.textContent = '+';
-    add.title = 'Start a new field (n)';
+    add.title = 'Start a new field (N)';
+    add.setAttribute('aria-label', 'Start a new field');
     add.addEventListener('click', startNewField);
-    strip.appendChild(add);
+    lead.appendChild(add);
+
+    const fields = Store.roots();
+    fields.forEach(field => strip.appendChild(tab(field.name, { fieldId: field.id })));
+
+    const count = document.getElementById('fieldPickerCount');
+    if (count) count.textContent = fields.length === 1 ? '1 field' : fields.length + ' fields';
 
     document.querySelectorAll('.tab-fixed').forEach(t => {
       const active = t.dataset.view === currentView;
       t.classList.toggle('is-active', active);
       t.setAttribute('aria-selected', String(active));
     });
+
+    /* Whichever field is open has to be visible without hunting for it, even
+       when it sits well off the right of the strip — but only when it has just
+       changed. Every refresh doing this would drag the strip back under anyone
+       who had scrolled it to look at something else. */
+    const current = strip.querySelector('.tab.is-active');
+    if (current && activeField !== scrolledTo && typeof current.scrollIntoView === 'function') {
+      current.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+    scrolledTo = activeField;
+    syncStripOverflow();
   }
+
+  /* The strip fades at whichever end has more tabs beyond it, so it is clear
+     there is more to see without a scrollbar sitting under the bar. */
+  function syncStripOverflow() {
+    const strip = document.getElementById('fieldTabsScroll');
+    const frame = document.getElementById('fieldStrip');
+    if (!strip || !frame) return;
+    const max = strip.scrollWidth - strip.clientWidth;
+    frame.classList.toggle('has-more-left',  strip.scrollLeft > 2);
+    frame.classList.toggle('has-more-right', strip.scrollLeft < max - 2);
+  }
+
+  /* ---------------- the field picker ---------------- */
+
+  /* With a handful of fields the strip is enough. With thirty it is not, and
+     scrolling sideways hunting for one is the worst way to navigate. The
+     picker answers that: every field in one list, filterable, keyboard-driven,
+     and dropped below the bar so it never covers the views pinned beside it. */
+  let pickerIndex = 0;
+
+  function pickerRows() {
+    const box = document.getElementById('fieldPickerSearch');
+    const q = (box.value || '').trim().toLowerCase();
+    const all = [{ id: null, name: 'All', isAll: true }, ...Store.roots()];
+    return all.filter(f => !q || f.name.toLowerCase().includes(q));
+  }
+
+  function renderPickerList() {
+    const list = document.getElementById('fieldPickerList');
+    const rows = pickerRows();
+    list.replaceChildren();
+
+    if (!rows.length) {
+      const empty = document.createElement('p');
+      empty.className = 'muted picker-empty';
+      empty.textContent = 'No field by that name.';
+      list.appendChild(empty);
+      return;
+    }
+
+    pickerIndex = Math.max(0, Math.min(pickerIndex, rows.length - 1));
+
+    rows.forEach((field, i) => {
+      const row = document.createElement('button');
+      row.className = 'picker-row';
+      row.setAttribute('role', 'option');
+      row.dataset.field = field.id || '';
+      if (i === pickerIndex) row.classList.add('is-cursor');
+
+      const open = currentView === 'tree' && (field.id || null) === activeField;
+      row.classList.toggle('is-open', open);
+      row.setAttribute('aria-selected', String(open));
+
+      if (field.isAll) {
+        row.innerHTML = '<span class="glyph">&#9678;</span><span class="picker-name">All</span>' +
+          '<span class="picker-meta">' + Store.roots().length + ' fields</span>';
+      } else {
+        row.innerHTML =
+          '<span class="dot" style="background:var(' + Store.STATUS_BY_ID[field.status].cssVar + ')"></span>' +
+          '<span class="picker-name">' + escapeHtml(field.name) + '</span>' +
+          '<span class="picker-meta">' + Store.descendantsOf(field.id).length + ' topics</span>' +
+          '<span class="picker-pct">' + Math.round(Store.progressOf(field.id) * 100) + '%</span>';
+      }
+
+      row.addEventListener('click', () => { closeFieldPicker(); openField(field.id); });
+      row.addEventListener('mousemove', () => {
+        if (pickerIndex === i) return;
+        pickerIndex = i;
+        [...list.children].forEach((el, j) => el.classList.toggle('is-cursor', j === i));
+      });
+      list.appendChild(row);
+    });
+
+    const cursor = list.querySelector('.is-cursor');
+    if (cursor && typeof cursor.scrollIntoView === 'function') {
+      cursor.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function openFieldPicker() {
+    const panel  = document.getElementById('fieldPicker');
+    const search = document.getElementById('fieldPickerSearch');
+    /* Both popovers close on a click anywhere, but the click that opens one
+       is stopped before it gets there — so the other is closed by hand. */
+    const dataMenu = document.getElementById('dataMenu');
+    if (dataMenu) {
+      dataMenu.hidden = true;
+      document.getElementById('dataMenuBtn').setAttribute('aria-expanded', 'false');
+    }
+
+    panel.hidden = false;
+    document.getElementById('fieldPickerBtn').setAttribute('aria-expanded', 'true');
+    search.value = '';
+    /* Start on the field already open, so Enter on its own changes nothing. */
+    pickerIndex = Math.max(0, pickerRows().findIndex(f => (f.id || null) === activeField));
+    renderPickerList();
+    search.focus();
+  }
+
+  function closeFieldPicker() {
+    const panel = document.getElementById('fieldPicker');
+    if (!panel || panel.hidden) return;
+    panel.hidden = true;
+    document.getElementById('fieldPickerBtn').setAttribute('aria-expanded', 'false');
+  }
+
+  const pickerIsOpen = () => !document.getElementById('fieldPicker').hidden;
 
   /* Naming a new field happens inline in the tab strip rather than in a
      browser prompt, so starting a new subject is a single gesture. */
@@ -265,6 +398,60 @@
 
     add.replaceWith(input);
     input.focus();
+  }
+
+  function wireFieldPicker() {
+    const btn    = document.getElementById('fieldPickerBtn');
+    const panel  = document.getElementById('fieldPicker');
+    const search = document.getElementById('fieldPickerSearch');
+    const strip  = document.getElementById('fieldTabsScroll');
+
+    btn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (pickerIsOpen()) closeFieldPicker(); else openFieldPicker();
+    });
+
+    search.addEventListener('input', () => { pickerIndex = 0; renderPickerList(); });
+
+    search.addEventListener('keydown', ev => {
+      const rows = pickerRows();
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        if (!rows.length) return;
+        pickerIndex = (pickerIndex + (ev.key === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length;
+        renderPickerList();
+      } else if (ev.key === 'Enter') {
+        ev.preventDefault();
+        const field = rows[pickerIndex];
+        if (!field) return;
+        closeFieldPicker();
+        openField(field.id);
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault();
+        closeFieldPicker();
+        btn.focus();
+      }
+    });
+
+    document.getElementById('fieldPickerNew').addEventListener('click', () => {
+      closeFieldPicker();
+      startNewField();
+    });
+
+    panel.addEventListener('click', ev => ev.stopPropagation());
+    document.addEventListener('click', closeFieldPicker);
+
+    /* A wheel over the strip moves it sideways: it is a horizontal list, and a
+       vertical wheel is the only gesture most mice have. */
+    strip.addEventListener('wheel', ev => {
+      if (ev.deltaY === 0 || ev.shiftKey) return;
+      if (strip.scrollWidth <= strip.clientWidth) return;
+      ev.preventDefault();
+      strip.scrollLeft += ev.deltaY;
+    }, { passive: false });
+
+    strip.addEventListener('scroll', syncStripOverflow);
+    window.addEventListener('resize', syncStripOverflow);
   }
 
   function openField(fieldId) {
@@ -367,6 +554,7 @@
 
     btn.addEventListener('click', ev => {
       ev.stopPropagation();
+      closeFieldPicker();
       menu.hidden = !menu.hidden;
       btn.setAttribute('aria-expanded', String(!menu.hidden));
     });
@@ -449,6 +637,7 @@
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
 
       if (ev.key === 'Escape') {
+        if (pickerIsOpen()) { closeFieldPicker(); return; }
         if (typing) { document.activeElement.blur(); return; }
         selectNode(null);
         return;
@@ -479,6 +668,9 @@
         openFixedView('stats');
       } else if (ev.key === 't') {
         openField(activeField);
+      } else if (ev.key === 'g') {
+        ev.preventDefault();
+        openFieldPicker();
       }
     });
   }
@@ -793,6 +985,7 @@
     applyInspectorWidth();
     wireInspectorResizer();
     wireDataMenu();
+    wireFieldPicker();
     wireSearch();
     wireKeyboard();
     maybeShowSeedBanner();

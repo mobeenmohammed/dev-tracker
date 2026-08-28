@@ -518,6 +518,11 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   .inspector { max-height: 45vh; }
   .brand-text p { display: none; }
   .search-wrap input { width: 130px; }
+  /* Six fixed views and a strip of fields will not both fit here. Rather than
+     let one push the other off the page, the views get a scroll of their own
+     and the fields keep theirs — so neither region can hide the other. */
+  .tabs-fixed { flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .tabs-fixed::-webkit-scrollbar { height: 0; }
 }
 
 @media (max-width: 700px) {
@@ -526,12 +531,20 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   .search-wrap { flex: 1; }
   .search-wrap input { width: 100%; }
   .canvas-hint { display: none; }
+  /* On a phone the strip has no room to be useful; the picker is the
+     navigation, and it is one tap away. */
+  .tabs-strip { display: none; }
+  .tab-picker { color: var(--text); }
   .list-row { grid-template-columns: 1fr 130px; }
   .list-row .hours, .list-row .kids { display: none; }
 }
 
 /* ---------- Tab bar: one tab per field, plus the fixed views ---------- */
 
+/* The bar itself never scrolls. If it did, enough fields would push "All", the
+   new-field button and every fixed view off the screen, and reaching any of
+   them would mean scrolling sideways first — which is exactly the problem the
+   strip and the picker exist to solve. Only the field tabs scroll. */
 .tabbar {
   display: flex;
   align-items: stretch;
@@ -540,12 +553,63 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
   flex: none;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  overflow: visible;
 }
 
-.tabs-fields, .tabs-fixed { display: flex; align-items: stretch; gap: 2px; }
-.tabs-fixed { margin-left: auto; padding-left: 16px; border-left: 1px solid var(--border); }
+.tabs-fields {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;                 /* lets the strip shrink instead of pushing */
+}
+.tabs-fixed {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  flex: none;
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+}
+.tabs-pinned { display: flex; align-items: stretch; gap: 2px; flex: none; }
+.tabs-more   { position: relative; }
+
+.tabs-strip { position: relative; flex: 1 1 auto; min-width: 0; }
+.tabs-scroll {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  /* No scrollbar under the bar: the fades say there is more, and the picker
+     is the way to reach it without dragging anything. */
+  scrollbar-width: none;
+}
+.tabs-scroll::-webkit-scrollbar { height: 0; }
+
+/* A fade at whichever end has tabs beyond it. */
+.tabs-strip::before, .tabs-strip::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 26px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .15s;
+  z-index: 1;
+}
+.tabs-strip::before {
+  left: 0;
+  background: linear-gradient(to right, var(--bg-elev), transparent);
+}
+.tabs-strip::after {
+  right: 0;
+  background: linear-gradient(to left, var(--bg-elev), transparent);
+}
+.tabs-strip.has-more-left::before  { opacity: 1; }
+.tabs-strip.has-more-right::after  { opacity: 1; }
 
 .tab {
   position: relative;
@@ -588,6 +652,92 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   padding: 4px 8px;
   font-size: 13px;
 }
+
+/* ---------- The field picker ---------- */
+
+.tab-picker { color: var(--text-dim); gap: 5px; }
+.tab-picker:hover, .tab-picker[aria-expanded="true"] { color: var(--accent); }
+.tab-picker .caret { font-size: 11px; opacity: .8; }
+
+/* Anchored to the button and dropped below the bar, so it covers the canvas
+   and never the views pinned beside it. Right-aligned so it grows inwards
+   rather than off the edge of the window. */
+.field-picker {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  width: min(320px, 88vw);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.field-picker input { width: 100%; }
+
+.picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+.picker-row .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.picker-row .glyph { font-size: 12px; color: var(--accent); width: 8px; text-align: center; flex: none; }
+.picker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.picker-meta { font-size: 11px; color: var(--text-faint); flex: none; }
+.picker-pct {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 32px;
+  text-align: right;
+  flex: none;
+}
+.picker-row.is-cursor { background: var(--bg-elev-2); }
+.picker-row.is-open   { color: var(--accent); font-weight: 500; }
+.picker-row.is-open .picker-pct { color: var(--accent); }
+.picker-empty { padding: 10px 8px; font-size: 12.5px; }
+
+.picker-new {
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--border);
+  padding: 7px 8px 2px;
+  cursor: pointer;
+}
+.picker-new:hover { color: var(--accent); }
 
 /* ---------- Tree: activity cues ---------- */
 

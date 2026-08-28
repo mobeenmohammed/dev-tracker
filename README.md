@@ -34,6 +34,21 @@ with **Focus**, **List** and **Stats** always pinned on the right.
 - **Stats** — overall progress, a 26-week activity grid you can click into, a
   study streak, per-field progress bars, and the recent session feed.
 
+### Getting around when there are a lot of fields
+
+The bar itself never scrolls. **All**, the **+** button and the field picker
+are pinned at one end, the fixed views at the other, and only the field tabs in
+between scroll — so no number of fields can push any of them off the screen.
+The strip fades at whichever end has more tabs beyond it, a wheel over it moves
+it sideways, and opening a field scrolls its tab into view.
+
+The picker is the real answer past a dozen fields. Press **g**, or click the
+**N fields ⌄** button, and every field is in one list with its status, topic
+count and progress. Type to filter, ↑/↓ to move, Enter to open, Escape to
+close — and it drops *below* the bar, so the views pinned beside it stay
+visible and clickable while it is open. Starting a new field is at the bottom
+of the same panel.
+
 ### The tree, and the graph
 
 A **field tab** shows that field as a top-down tidy tree: the field at the top,
@@ -576,9 +591,10 @@ drive the page in tests.
 | `Enter` (in search) | Jump to the first match |
 | `n` | Add a sub-topic under the selection (or the field in focus) |
 | `N` | Start a new field |
+| `g` | Go to a field — opens the picker, then type / ↑↓ / Enter |
 | `t` `d` `p` `j` `a` `l` `s` | Tree / Focus / Problems / Projects / Applications / List / Stats |
 | `f` | Fit the tree to the screen |
-| `Esc` | Clear the selection |
+| `Esc` | Close the picker, or clear the selection |
 
 ## Layout
 

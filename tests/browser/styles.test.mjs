@@ -49,6 +49,26 @@ const overlays = [...doc.querySelectorAll('[hidden]')].filter(el => display(el) 
 check('no hidden element is still displayed', overlays.length === 0,
       overlays.map(el => el.id || el.className).join(', '));
 
+/* The tab bar must never scroll as a whole. When it did, enough fields pushed
+   All, the new-field button and every fixed view off the right-hand edge, and
+   reaching any of them meant scrolling sideways first. */
+const bar = doc.querySelector('.tabbar');
+const barStyle = window.getComputedStyle(bar);
+check('the bar itself does not scroll sideways',
+      barStyle.overflowX !== 'auto' && barStyle.overflowX !== 'scroll',
+      `overflow-x: ${barStyle.overflowX}`);
+check('the strip is the only thing that does',
+      /\.tabs-scroll\s*\{[^}]*overflow-x:\s*auto/.test(css));
+check('and the fixed views cannot be squeezed out of it',
+      /\.tabs-fixed\s*\{[^}]*flex:\s*none/.test(css));
+check('nor All and the new-field button',
+      /\.tabs-pinned\s*\{[^}]*flex:\s*none/.test(css));
+
+/* The picker hangs below the bar rather than taking room inside it. */
+check('the picker is taken out of the flow',
+      window.getComputedStyle(doc.querySelector('#fieldPicker')).position === 'absolute');
+check('and starts hidden', doc.querySelector('#fieldPicker').hasAttribute('hidden'));
+
 /* A borrowed card has to be obviously not native to the tree it is drawn in,
    so the difference has to survive into the computed style rather than living
    only in the class name. */

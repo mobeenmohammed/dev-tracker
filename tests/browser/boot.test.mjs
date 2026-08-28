@@ -59,7 +59,11 @@ const check = (label, cond, detail = '') => {
   check('no relative dates drawn', doc.querySelectorAll('#nodes .sub-label').length === 0);
   check('toggle button reflects it', !doc.getElementById('activityBtn').classList.contains('is-on'));
   check('booted without errors', errors.length === 0, errors.join(' | '));
-  check('tabs still built', tabs.length === 6, `${tabs.length}`);
+  // All, +, one per field, and the picker
+  check('tabs still built', tabs.length === 7, `${tabs.length}`);
+  check('and the picker knows the count',
+        doc.getElementById('fieldPickerCount').textContent === '4 fields',
+        doc.getElementById('fieldPickerCount').textContent);
 }
 
 /* --- 2. a field deleted since the last visit falls back to the combined tree --- */
