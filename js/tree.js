@@ -142,6 +142,32 @@ const Tree = (() => {
     return root;
   }
 
+  /* How far the card's own edge is from its centre along a direction. Cards
+     are wide rectangles, so a single radius is wrong in most directions: it
+     leaves an arrowhead sitting inside the card, which is painted over the
+     links and hides it. */
+  function edgeOffset(card, ux, uy) {
+    const toSide = Math.abs(ux) > 1e-6 ? (card.w / 2) / Math.abs(ux) : Infinity;
+    const toEnd  = Math.abs(uy) > 1e-6 ? (card.h / 2) / Math.abs(uy) : Infinity;
+    return Math.min(toSide, toEnd);
+  }
+
+  const unitBetween = (from, to) => {
+    const dx = to.x - from.x, dy = to.y - from.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    return { ux: dx / dist, uy: dy / dist, dist };
+  };
+
+  /* A straight run that stops on both cards' edges. In a tree the parent-child
+     curve already ends on the card's edge; in the graph a line runs centre to
+     centre, so a connection has to be inset by hand. */
+  function insetPath(from, to) {
+    const { ux, uy } = unitBetween(from, to);
+    const a = edgeOffset(from, ux, uy) + 5;
+    const b = edgeOffset(to, ux, uy) + 5;
+    return `M${from.x + ux * a},${from.y + uy * a}L${to.x - ux * b},${to.y - uy * b}`;
+  }
+
   /* A vertical S-curve from the parent's bottom edge to the child's top. In
      the graph there is no consistent direction, so a plain line is honest. */
   function linkPath(parent, child) {
@@ -167,6 +193,15 @@ const Tree = (() => {
 
   const GRAPH = {
     iterations: 320,
+    /* Every step compares every pair, so the cost is n^2 per step and a fixed
+       iteration count means the graph quietly stops being usable as the tree
+       grows. The step count is whatever fits a budget of pair comparisons
+       instead, with a floor that still settles a small graph properly. Nudging
+       a layout that is nearly all cached needs far fewer steps than laying one
+       out from nothing. */
+    budget:     25e6,
+    minSteps:   60,
+    warmSteps:  70,
     repulsion:  46000,
     springLen:  132,
     springK:    0.055,
@@ -203,9 +238,10 @@ const Tree = (() => {
 
     /* Deterministic starting ring, so an unchanged graph always settles the
        same way rather than looking different on each reload. */
+    let known = 0;
     nodes.forEach((n, i) => {
       const cached = graphPos.get(n.id);
-      if (cached) { n.x = cached.x; n.y = cached.y; }
+      if (cached) { n.x = cached.x; n.y = cached.y; known++; }
       else {
         const angle = (i / Math.max(1, nodes.length)) * Math.PI * 2;
         const radius = 160 + (i % 7) * 42;
@@ -226,7 +262,13 @@ const Tree = (() => {
       B.vx -= dx * force; B.vy -= dy * force;
     });
 
-    for (let step = 0; step < GRAPH.iterations; step++) {
+    /* Adding one topic to a settled graph is a nudge, not a fresh layout. */
+    const warm = nodes.length > 1 && known >= nodes.length - 1 - nodes.length * 0.05;
+    const affordable = Math.round(GRAPH.budget / Math.max(1, nodes.length * nodes.length));
+    const steps = Math.max(GRAPH.minSteps,
+                           Math.min(warm ? GRAPH.warmSteps : GRAPH.iterations, affordable));
+
+    for (let step = 0; step < steps; step++) {
       /* Everything pushes everything, which is affordable at this size and
          keeps unrelated branches from piling up. */
       for (let i = 0; i < nodes.length; i++) {
@@ -285,6 +327,10 @@ const Tree = (() => {
       if (!moved) break;
     }
 
+    /* Positions for topics that no longer exist would otherwise accumulate for
+       as long as the tab is open. */
+    const live = new Set(nodes.map(n => n.id));
+    graphPos.forEach((_, id) => { if (!live.has(id)) graphPos.delete(id); });
     nodes.forEach(n => graphPos.set(n.id, { x: n.x, y: n.y }));
     return nodes;
   }
@@ -381,8 +427,12 @@ const Tree = (() => {
       if (kind === 'connect') cls.push('is-connect');
       if (isDim(to)) cls.push('is-dimmed');
       if (to.id === selectedId || from.id === selectedId) cls.push('is-hot');
-      const path = el('path', { class: cls.join(' '), d: linkPath(from, to) });
-      if (kind === 'connect') path.setAttribute('marker-end', 'url(#connect-arrow)');
+      const arrowed = kind === 'connect';
+      const path = el('path', {
+        class: cls.join(' '),
+        d: arrowed && isGraphMode() ? insetPath(from, to) : linkPath(from, to),
+      });
+      if (arrowed) path.setAttribute('marker-end', 'url(#connect-arrow)');
       gLinks.appendChild(path);
     });
 
@@ -452,13 +502,12 @@ const Tree = (() => {
      runs alongside a parent-child edge, and stops at the card's edge so the
      arrowhead is not hidden underneath it. */
   function refPath(from, to) {
-    const dx = to.x - from.x, dy = to.y - from.y;
-    const dist = Math.hypot(dx, dy) || 1;
-    const ux = dx / dist, uy = dy / dist;
+    const { ux, uy, dist } = unitBetween(from, to);
 
-    const inset = t => Math.min(t.w / 2, t.h / 2) + 6;
-    const x1 = from.x + ux * inset(from), y1 = from.y + uy * inset(from);
-    const x2 = to.x - ux * inset(to),     y2 = to.y - uy * inset(to);
+    const a = edgeOffset(from, ux, uy) + 5;
+    const b = edgeOffset(to, ux, uy) + 5;
+    const x1 = from.x + ux * a, y1 = from.y + uy * a;
+    const x2 = to.x - ux * b,   y2 = to.y - uy * b;
 
     const bow = Math.min(70, dist * 0.22);
     const cx = (x1 + x2) / 2 - uy * bow;
@@ -803,8 +852,13 @@ const Tree = (() => {
     onSelect(selectedId);
   }
 
+  /* A topic with no sub-topics of its own can still have a branch connected
+     into it, and that branch is drawn beneath it like any other — so it folds
+     like any other. Counting only real children left a fold badge on screen
+     that did nothing when clicked. */
   function toggleCollapse(id) {
-    if (!Store.byId(id) || !Store.childrenOf(id).length) return;
+    if (!Store.byId(id)) return;
+    if (!Store.childrenOf(id).length && !Store.connectedInto(id).length) return;
     collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
     render();
   }
@@ -866,7 +920,7 @@ const Tree = (() => {
   }
 
   return {
-    init, render, fit, zoom, centerOn, select, expandAll, setQuery, toggleCollapse,
+    init, render, fit, queueFit, zoom, centerOn, select, expandAll, setQuery, toggleCollapse,
     setRoot, setShowActivity, setShowRefs, relayoutGraph, startRename,
     get selectedId()   { return selectedId; },
     get rootId()       { return rootId; },

@@ -57,6 +57,11 @@ const barStyle = window.getComputedStyle(bar);
 check('the bar itself does not scroll sideways',
       barStyle.overflowX !== 'auto' && barStyle.overflowX !== 'scroll',
       `overflow-x: ${barStyle.overflowX}`);
+/* The wheel handler writes scrollLeft on every tick; an animated scroll would
+   restart from a half-finished position each time and the strip would creep
+   instead of tracking the wheel. */
+check('the strip does not animate its own scrolling',
+      !/\.tabs-scroll\s*\{[^}]*scroll-behavior:\s*smooth/.test(css));
 check('the strip is the only thing that does',
       /\.tabs-scroll\s*\{[^}]*overflow-x:\s*auto/.test(css));
 check('and the fixed views cannot be squeezed out of it',

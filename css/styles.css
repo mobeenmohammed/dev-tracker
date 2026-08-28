@@ -211,6 +211,15 @@ kbd {
 }
 .banner-actions { margin-left: auto; display: flex; gap: 7px; }
 
+/* A failed save is not an informational banner: from that point nothing is
+   being kept, so it reads as the problem it is. */
+.banner-danger {
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-elev));
+  border-bottom-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--text);
+  font-weight: 500;
+}
+
 /* ---------- Layout ---------- */
 
 .layout {
@@ -582,7 +591,9 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   height: 100%;
   overflow-x: auto;
   overflow-y: hidden;
-  scroll-behavior: smooth;
+  /* Not smooth: the wheel handler sets scrollLeft on every tick, and an
+     animated scroll would restart from a half-finished position each time,
+     so the strip crept instead of tracking the wheel. */
   /* No scrollbar under the bar: the fades say there is more, and the picker
      is the way to reach it without dragging anything. */
   scrollbar-width: none;

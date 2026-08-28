@@ -233,15 +233,31 @@ const Store = (() => {
 
   function emit() { listeners.forEach(fn => fn(state)); }
 
+  /* Browsers cap localStorage at roughly 5MB per site. A long history of
+     solved problems is what gets there first — a few thousand solves with
+     their titles and tags is most of the budget.
+
+     Swallowing the failure is the worst thing that could be done with it:
+     everything from that moment on is lost on the next reload, and nothing
+     on screen says so. The failure is remembered instead, and the app puts it
+     in front of the person with a way to get their data out. */
+  let storageBroken = false;
+
   function persist() {
     state.updatedAt = nowISO();
     try {
       localStorage.setItem(LS_KEY, JSON.stringify(state));
+      storageBroken = false;
     } catch (err) {
+      storageBroken = true;
       console.warn('Could not write to localStorage:', err);
     }
     emit();
   }
+
+  /* Roughly what the saved state costs, so the warning can say how big it is
+     rather than leaving the person to guess what "too large" means. */
+  const storedBytes = () => JSON.stringify(state).length * 2;
 
   /* ---------------- loading ---------------- */
 
@@ -444,7 +460,7 @@ const Store = (() => {
        borrowing, which the tree cannot draw. The offending connection is
        dropped rather than the move being refused: the person moved the topic
        deliberately, and a connection is the cheaper thing to make again. */
-    if ('parentId' in patch) pruneLoopingConnections();
+    lastPruned = 'parentId' in patch ? pruneLoopingConnections() : 0;
     persist();
     return node;
   }
@@ -787,11 +803,20 @@ const Store = (() => {
   const wouldLoop = (from, to) =>
     from === to || graftReaches(state.nodes, state.connections, from, to);
 
-  /* True when `from` is already drawn somewhere below `to` — as a real
-     sub-topic or through a connection already made. Bringing it in again
-     would put two cards for one topic in the same tree and say nothing new. */
-  const alreadyShownIn = (from, to) =>
-    from !== to && graftReaches(state.nodes, state.connections, to, from);
+  /* True when `from` is already drawn in the tree `to` belongs to — as a real
+     sub-topic anywhere in it, or through a connection already made. Bringing
+     it in again would put two cards for one topic in one tree and say nothing
+     new.
+
+     The question is asked of the whole field tree, not just of the branch
+     below `to`. Connecting Linear Algebra into Machine Learning and then into
+     one of Machine Learning's own sub-topics is not a loop, so the loop rule
+     lets it through, but it draws Linear Algebra twice in the same picture. */
+  const alreadyShownIn = (from, to) => {
+    if (from === to) return false;
+    const field = domainOf(to);
+    return !!field && graftReaches(state.nodes, state.connections, field.id, from);
+  };
 
   /* The one question the inspector and the store both need to ask. */
   const canConnect = (from, to) =>
@@ -824,6 +849,11 @@ const Store = (() => {
      made, so they are re-checked whenever the shape of the tree moves. The
      ones that survive are kept in order, so an older connection outlives a
      newer one that conflicts with it. */
+  /* How many connections the last move had to drop. A move that quietly
+     deletes something the person made is worth a word about, so it is
+     remembered for whoever draws the result. */
+  let lastPruned = 0;
+
   function pruneLoopingConnections() {
     const kept = [];
     state.connections.forEach(c => {
@@ -834,6 +864,57 @@ const Store = (() => {
     const dropped = state.connections.length - kept.length;
     state.connections = kept;
     return dropped;
+  }
+
+  /* Every topic that could be shown under `hostId`.
+
+     Asking canConnect once per topic rebuilds the same adjacency n times over,
+     which is quadratic in the size of the tree and was the slowest thing in
+     the inspector by a wide margin. Two walks of the shape answer it for all
+     of them at once: everything already drawn below the host, and everything
+     the host is already drawn below. What is left is what can be connected. */
+  function connectableInto(hostId) {
+    if (!byId(hostId)) return [];
+
+    const kids = new Map();
+    const parent = new Map();
+    state.nodes.forEach(n => {
+      if (!n.parentId) return;
+      if (!kids.has(n.parentId)) kids.set(n.parentId, []);
+      kids.get(n.parentId).push(n.id);
+      parent.set(n.id, n.parentId);
+    });
+
+    const brought = new Map();     // a host, and the branches drawn under it
+    const lent    = new Map();     // a branch, and the hosts it is drawn under
+    state.connections.forEach(c => {
+      if (!brought.has(c.to)) brought.set(c.to, []);
+      brought.get(c.to).push(c.from);
+      if (!lent.has(c.from)) lent.set(c.from, []);
+      lent.get(c.from).push(c.to);
+    });
+
+    const walk = (start, edgesOf) => {
+      const seen = new Set([start]);
+      const stack = [start];
+      while (stack.length) {
+        edgesOf(stack.pop()).forEach(next => {
+          if (seen.has(next)) return;
+          seen.add(next);
+          stack.push(next);
+        });
+      }
+      return seen;
+    };
+
+    /* Down from the top of the host's own tree, not from the host: anything
+       already drawn anywhere in that tree would be drawn twice. */
+    const field = domainOf(hostId);
+    const down = walk(field ? field.id : hostId,
+                      id => (kids.get(id) || []).concat(brought.get(id) || []));
+    const up   = walk(hostId, id => (parent.has(id) ? [parent.get(id)] : []).concat(lent.get(id) || []));
+
+    return state.nodes.filter(n => !down.has(n.id) && !up.has(n.id));
   }
 
   /* Read from one topic's side: what it borrows, and where it is lent out. */
@@ -2004,6 +2085,8 @@ const Store = (() => {
     get state()    { return state; },
     get pendingSeed() { return seedMeta; },
     onChange(fn)   { listeners.push(fn); },
+    get storageBroken() { return storageBroken; },
+    storedBytes,
     byId, roots, childrenOf, ancestorsOf, descendantsOf, domainOf, depthOf, wouldCycle,
     progressOf, minutesFor, sessionsFor, statusCounts, currentStreak,
     lastWorked, daysBetween, relativeDay,
@@ -2024,7 +2107,9 @@ const Store = (() => {
     tagIndex, setTagMapping, nodeForTags,
     isPrivate, privateNodeIds,
     addLink, updateLink, deleteLink, linksFor, relatedTo, LINK_TYPES, prerequisiteWarnings,
-    addConnection, deleteConnection, connectionsFor, connectedInto, canConnect,
+    addConnection, deleteConnection, connectionsFor, connectedInto,
+    canConnect, connectableInto,
+    get lastPrunedConnections() { return lastPruned; },
     TAG_CATALOGUE, catalogueTags, knownTags,
     APP_STAGES, STAGE_BY_ID, applications, addApplication, updateApplication,
     deleteApplication, addApplicationEvent, deleteApplicationEvent, applicationStats, applicationFlow,

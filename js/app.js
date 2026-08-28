@@ -106,6 +106,23 @@
     window.addEventListener('resize', applyInspectorWidth);
   }
 
+  /* ---------------- storage ---------------- */
+
+  /* A failed save is not a log line: from that point the tracker is a
+     read-only view of stale data and nothing else would say so. */
+  function syncStorageWarning() {
+    const bar = document.getElementById('storageWarning');
+    if (!bar) return;
+
+    if (!Store.storageBroken) { bar.hidden = true; return; }
+
+    const mb = (Store.storedBytes() / 1048576).toFixed(1);
+    document.getElementById('storageWarningText').textContent =
+      `Changes are no longer being saved — this browser will not store ${mb} MB. ` +
+      `Export your data now; anything since the last successful save is lost on reload.`;
+    bar.hidden = false;
+  }
+
   /* ---------------- toast ---------------- */
 
   let toastTimer;
@@ -120,6 +137,8 @@
   /* ---------------- rendering ---------------- */
 
   function refresh() {
+    syncStorageWarning();
+
     const p = Store.state.profile;
     document.getElementById('profileName').textContent = p.name || 'Learning Tree';
     document.getElementById('profileSubtitle').textContent = p.subtitle || '';
@@ -148,7 +167,11 @@
     if (view === 'problems') { Problems.fillForm(); Problems.render(); }
     if (view === 'apps') { Applications.fillForm(); Applications.render(); }
     if (view === 'projects') { Projects.fillForm(); Projects.render(); }
-    if (view === 'tree')  requestAnimationFrame(() => Tree.fit());
+    /* Through the tree's queue rather than a raw frame, so that centring on a
+       topic in the same gesture cancels it. Opening a topic in another field
+       used to land on it and be pulled straight back out to the whole tree by
+       this fit, one frame later. */
+    if (view === 'tree')  Tree.queueFit();
     persistUi();
   }
 
@@ -195,6 +218,9 @@
     if (!activeField || Store.byId(activeField)) return;
     activeField = null;
     Tree.setRoot(null);
+    /* The canvas is a graph now, and has to say so: the grab cursor, the hint
+       and the Re-layout button all follow the mode rather than the tree. */
+    syncCanvasMode();
     persistUi();
   }
 
@@ -439,6 +465,9 @@
         openField(field.id);
       } else if (ev.key === 'Escape') {
         ev.preventDefault();
+        /* Or the document handler sees a closed picker and goes on to clear
+           the selection, which is not what closing a picker means. */
+        ev.stopPropagation();
         closeFieldPicker();
         btn.focus();
       }
@@ -701,12 +730,26 @@
 
   function wireSearch() {
     const input = document.getElementById('search');
+
+    /* Every keystroke redraws every card. On a small tree that is free; on a
+       few hundred topics it makes typing feel like wading, so the redraw waits
+       until the typing pauses. Short enough to read as instant. */
+    let typing;
     input.addEventListener('input', () => {
-      Tree.setQuery(input.value);
-      if (currentView === 'list') Views.renderList(selectedId);
+      clearTimeout(typing);
+      typing = setTimeout(() => {
+        Tree.setQuery(input.value);
+        if (currentView === 'list') Views.renderList(selectedId);
+      }, 110);
     });
     input.addEventListener('keydown', ev => {
       if (ev.key !== 'Enter') return;
+      /* Enter is not going to wait for a pause it just interrupted, so the
+         pending redraw is cancelled and done now instead of dropped. */
+      clearTimeout(typing);
+      Tree.setQuery(input.value);
+      if (currentView === 'list') Views.renderList(selectedId);
+
       const q = input.value.trim().toLowerCase();
       const hit = Store.state.nodes.find(n => n.name.toLowerCase().includes(q));
       if (!hit) return;
@@ -995,6 +1038,12 @@
 
     applyInspectorWidth();
     wireInspectorResizer();
+    document.getElementById('storageExport').addEventListener('click', () => {
+      handleDataAction('export');
+      if (Store.hasPrivateData()) handleDataAction('export-private');
+    });
+    Store.onChange(syncStorageWarning);
+
     wireDataMenu();
     wireFieldPicker();
     wireSearch();

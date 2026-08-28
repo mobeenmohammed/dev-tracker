@@ -1061,6 +1061,21 @@ check('and the borrowed head is the taller card',
         return +head.getAttribute('height') > +kid.getAttribute('height');
       })());
 
+/* References carry arrowheads too, and had the same too-short inset. */
+Store.addLink('cpp-move', 'hpc-openmp', '', 'relates');
+click(tabNamed('All'));
+check('a reference arrow also stops outside its target card',
+      (() => {
+        const edge = $('#links .ref-link');
+        if (!edge) return false;
+        const [, x2, y2] = edge.getAttribute('d').match(/ (-?[\d.]+),(-?[\d.]+)$/);
+        return ![...$$('#nodes foreignObject')].some(f => {
+          const x = +f.getAttribute('x'), y = +f.getAttribute('y');
+          return +x2 > x && +x2 < x + +f.getAttribute('width')
+              && +y2 > y && +y2 < y + +f.getAttribute('height');
+        });
+      })(), $('#links .ref-link') ? $('#links .ref-link').getAttribute('d') : 'no reference drawn');
+
 /* The All graph is not a hierarchy, so a connection is an edge there rather
    than a nesting — but still drawn as a connection, not as parentage. */
 click(tabNamed('All'));
@@ -1068,6 +1083,20 @@ check('the graph draws the connection as its own kind of edge',
       connectEdges().length === 1, `${connectEdges().length} connect edges in the graph`);
 check('and no card is borrowed in the graph, where each is drawn once',
       $$('#nodes .node.is-borrowed').length === 0);
+/* The cards are painted over the links, so an arrow that ran to the centre of
+   its target would have its head hidden underneath it. A card is a wide
+   rectangle, so stopping at a single radius was not far enough either. */
+check('the connection arrow stops short of the card it points at',
+      (() => {
+        const edge = $('#links .link.is-connect');
+        const [, x2, y2] = edge.getAttribute('d').match(/L(-?[\d.]+),(-?[\d.]+)/);
+        const target = [...$$('#nodes foreignObject')].find(f => {
+          const x = +f.getAttribute('x'), y = +f.getAttribute('y');
+          const w = +f.getAttribute('width'), h = +f.getAttribute('height');
+          return +x2 > x && +x2 < x + w && +y2 > y && +y2 < y + h;
+        });
+        return !target;                     // the end must not land inside a card
+      })(), $('#links .link.is-connect').getAttribute('d'));
 check('the graph still draws every topic exactly once',
       treeNodes().length === Store.state.nodes.length,
       `${treeNodes().length} vs ${Store.state.nodes.length}`);
@@ -1225,6 +1254,117 @@ check('no card stands in for the whole tree',
 check('every card drawn is a real topic',
       treeNodes().every(el => !!Store.state.nodes.find(n => n.name === nodeLabel(el))),
       treeNodes().map(nodeLabel).filter(l => !Store.state.nodes.some(n => n.name === l)).join(','));
+
+/* ---------- 13. searching does not redraw on every keystroke ---------- */
+
+click(tabNamed('C++'));
+Tree.setQuery('');
+const searchBox = $('#search');
+const lit = () => $$('#nodes .node.is-match').length;
+
+searchBox.value = 'cma';
+fire(searchBox, 'input');
+searchBox.value = 'cmak';
+fire(searchBox, 'input');
+searchBox.value = 'cmake';
+fire(searchBox, 'input');
+check('typing has not redrawn the tree yet', lit() === 0, `${lit()} lit already`);
+
+await new Promise(r => setTimeout(r, 200));
+check('the redraw lands once the typing pauses', lit() >= 1, `${lit()} lit`);
+
+/* Enter must not wait for a pause it has just interrupted. */
+searchBox.value = 'sanitiz';
+fire(searchBox, 'input');
+key(searchBox, 'Enter');
+check('Enter applies the search straight away',
+      $$('#nodes .node.is-match').length >= 1 && lit() > 0 &&
+      /Sanitiz/.test([...$$('#nodes .node.is-match')].map(nodeLabel).join(' ')),
+      [...$$('#nodes .node.is-match')].map(nodeLabel).join(','));
+check('and jumps to the match', /Sanitiz/.test(Store.byId(Tree.selectedId).name),
+      Store.byId(Tree.selectedId).name);
+
+searchBox.value = '';
+Tree.setQuery('');
+
+/* ---------- 14. what the review turned up ---------- */
+
+/* A leaf with a branch connected into it shows a fold badge; clicking it used
+   to do nothing, because folding counted real sub-topics only. */
+Store.addConnection('math-linalg', 'cpp-raii');     // RAII has no sub-topics
+click(tabNamed('C++'));
+const withGraft = treeNodes().length;
+const raiiFold = nodeNamed('RAII').querySelector('.card-badge');
+check('a leaf with a branch connected in offers to fold it',
+      !!raiiFold && raiiFold.style.display !== 'none');
+click(raiiFold);
+check('and folding it actually hides the branch',
+      treeNodes().length < withGraft, `${treeNodes().length} vs ${withGraft}`);
+click(nodeNamed('RAII').querySelector('.card-badge'));
+check('unfolding brings it back', treeNodes().length === withGraft,
+      `${treeNodes().length} vs ${withGraft}`);
+
+/* Following a borrowed card must land on the topic, not be dragged back out
+   to the whole tree by the fit that changing view schedules a frame later. */
+const borrowedHead = [...nodeNamed('Linear Algebra').querySelectorAll('.card-btn')]
+  .find(b => b.dataset.act === 'origin');
+click(borrowedHead);
+const landed = $('#viewport').getAttribute('transform');
+await new Promise(r => window.requestAnimationFrame(() => window.requestAnimationFrame(r)));
+check('the view stays where following the connection put it',
+      $('#viewport').getAttribute('transform') === landed,
+      `${landed} became ${$('#viewport').getAttribute('transform')}`);
+Store.state.connections.slice().forEach(c => Store.deleteConnection(c.id));
+
+/* Escape closes the picker. It must not also clear what was selected. */
+click(tabNamed('C++'));
+clickNode('RAII');
+check('something is selected', Tree.selectedId === 'cpp-raii', String(Tree.selectedId));
+click($('#fieldPickerBtn'));
+key($('#fieldPickerSearch'), 'Escape');
+check('Escape closes the picker', $('#fieldPicker').hidden);
+check('and leaves the selection alone', Tree.selectedId === 'cpp-raii', String(Tree.selectedId));
+
+/* Falling back to All has to tell the canvas it is a graph now. */
+const throwaway = Store.addNode({ parentId: null, name: 'Throwaway' });
+click(tabNamed('All'));
+click(tabNamed('Throwaway'));
+clickNode('Throwaway');
+click($('#deleteBtn'));
+check('the canvas knows it is a graph again',
+      $('.canvas-wrap').classList.contains('is-graph'));
+check('the re-layout button works again', !$('#relayoutBtn').disabled);
+check('and the hint describes the graph', /Drag a card/.test($('#canvasHint').textContent),
+      $('#canvasHint').textContent);
+
+/* ---------- 15. a failed save is put in front of you ---------- */
+
+/* Silently losing everything typed after the quota is reached is the worst
+   thing this could do, so it says so and offers the way out. */
+check('no warning while saving works', $('#storageWarning').hidden);
+
+/* jsdom's Storage is a proxy that turns an assignment into a stored key, so
+   the failure has to be injected on the prototype. */
+const realSetItem = window.Storage.prototype.setItem;
+window.Storage.prototype.setItem = () => {
+  const err = new Error('exceeded the quota');
+  err.name = 'QuotaExceededError';
+  throw err;
+};
+Store.addNode({ parentId: null, name: 'One too many' });
+
+check('a failed save raises a warning', !$('#storageWarning').hidden);
+check('it says changes are not being saved',
+      /no longer being saved/.test($('#storageWarningText').textContent),
+      $('#storageWarningText').textContent);
+check('and it says how big the state is',
+      /\d+(\.\d+)? MB/.test($('#storageWarningText').textContent),
+      $('#storageWarningText').textContent);
+check('with a way to rescue the data', !!$('#storageExport'));
+
+window.Storage.prototype.setItem = realSetItem;
+Store.updateNode(Store.roots()[0].id, { name: Store.roots()[0].name });
+check('and it clears once saving works again', $('#storageWarning').hidden);
 
 if (errors.length) {
   console.log('--- runtime errors ---');

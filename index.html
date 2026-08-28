@@ -76,6 +76,16 @@
   </div>
 </nav>
 
+<!-- Shown only when a save has actually failed. Everything done from that
+     moment on is lost on the next reload, so it says so and offers the one
+     thing worth doing about it. -->
+<div id="storageWarning" class="banner banner-danger" hidden>
+  <span id="storageWarningText"></span>
+  <span class="banner-actions">
+    <button id="storageExport" class="btn btn-sm btn-primary">Export everything now</button>
+  </span>
+</div>
+
 <div id="banner" class="banner" hidden>
   <span id="bannerText"></span>
   <span class="banner-actions">

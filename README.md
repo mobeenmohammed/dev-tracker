@@ -532,6 +532,31 @@ Focus tasks are stored per day, which is what makes the history possible:
   "done": true, "doneAt": "2026-08-22T11:05:00.000Z", "nodeId": "cpp-move" }
 ```
 
+### How much it can hold
+
+The live store is `localStorage`, which browsers cap at roughly **5 MB per
+site**. Measured, the state costs about:
+
+| | localStorage |
+| --- | --- |
+| 50 topics, 200 sessions, 200 solves | 0.2 MB |
+| 300 topics, 1 500 sessions, 1 500 solves | 1.6 MB |
+| 1 000 topics, 6 000 sessions, 6 000 solves | 6.3 MB — **past the cap** |
+
+Solved problems are what get there first: each carries a title, URL, difficulty
+and tags, and a Codeforces sync imports everything back to your first
+submission. Topics themselves are cheap.
+
+If a save ever fails, a red bar appears saying so and offering to export
+everything — because the alternative is losing the rest of the session on the
+next reload without being told. Exporting and starting a fresh browser profile,
+or trimming old solves, is the way back under the cap.
+
+The other ceiling is drawing: the **All** graph builds a card for every topic,
+so past roughly 500 it is slow to draw and too dense to read. One field at a
+time stays fast well beyond that — a single tree of 2 000 topics renders in
+under a tenth of a second.
+
 ## Running it locally
 
 Any static server works. From the repo root:

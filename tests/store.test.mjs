@@ -1007,5 +1007,104 @@ Store.mergeJSON(twice);
 Store.mergeJSON(twice);
 check('merging is idempotent for connections', Store.state.connections.length, 2);
 
+/* --- the candidate list must agree with the rule it stands in for --- */
+
+/* connectableInto answers for every topic at once what canConnect answers for
+   one, because asking per topic rebuilt the same adjacency n times over. The
+   two are checked against each other on random shapes: a disagreement would
+   mean the form offering a connection the store then refuses. */
+{
+  let rng = 4242;
+  const rand = n => (rng = (rng * 1103515245 + 12345) & 0x7fffffff) % n;
+  let mismatches = 0, checked = 0;
+
+  for (let trial = 0; trial < 40; trial++) {
+    const size = 6 + rand(10);
+    const shape = [];
+    for (let i = 0; i < size; i++) {
+      shape.push({ id: 'x' + i, name: 'T' + i,
+                   parentId: i === 0 || rand(3) === 0 ? null : 'x' + rand(i) });
+    }
+    Store.importJSON(JSON.stringify({ nodes: shape }));
+    for (let c = 0; c < 5; c++) Store.addConnection('x' + rand(size), 'x' + rand(size));
+
+    const ids = Store.state.nodes.map(n => n.id);
+    ids.forEach(host => {
+      const offered = new Set(Store.connectableInto(host).map(n => n.id));
+      ids.forEach(from => {
+        checked++;
+        if (Store.canConnect(from, host) !== offered.has(from)) mismatches++;
+      });
+    });
+  }
+  check('the offered list matches the rule on every pair', mismatches, 0);
+  check('and the check was not vacuous', checked > 2000, true);
+}
+
+/* --- a branch is not brought into a tree it is already drawn in --- */
+
+/* The loop rule alone let this through: connecting a branch into a tree and
+   then into one of that tree's own sub-topics is not a loop, but it draws the
+   same branch twice in one picture. */
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'maths', parentId: null,    name: 'Maths' },
+    { id: 'la',    parentId: 'maths', name: 'Linear algebra' },
+    { id: 'svd',   parentId: 'la',    name: 'SVD' },
+    { id: 'ml',    parentId: null,    name: 'Machine learning' },
+    { id: 'nets',  parentId: 'ml',    name: 'Neural nets' },
+    { id: 'other', parentId: null,    name: 'Something else' },
+  ],
+}));
+check('a branch connects into another tree',      !!Store.addConnection('la', 'ml'), true);
+check('but not a second time, deeper in it',      Store.addConnection('la', 'nets'), null);
+check('nor does anything else it brought with it', Store.addConnection('svd', 'nets'), null);
+check('the form does not offer them either',
+      [Store.canConnect('la', 'nets'), Store.canConnect('svd', 'nets')], [false, false]);
+check('a tree it is not in is still open to it',
+      !!Store.addConnection('la', 'other'), true);
+check('and so is the other direction of an unrelated pair',
+      !!Store.addConnection('nets', 'svd'), true);
+
+/* --- a move that breaks a connection says so --- */
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'a', parentId: null, name: 'A' },
+    { id: 'b', parentId: null, name: 'B' },
+    { id: 'c', parentId: 'b',  name: 'C' },
+  ],
+}));
+Store.addConnection('a', 'c');
+check('connected before the move', Store.state.connections.length, 1);
+Store.updateNode('b', { parentId: 'a' });
+check('the move drops the connection it broke', Store.state.connections.length, 0);
+check('and says how many it dropped',           Store.lastPrunedConnections, 1);
+Store.updateNode('b', { parentId: null });
+check('a move that breaks nothing reports nothing', Store.lastPrunedConnections, 0);
+
+/* --- a save that fails is remembered, not swallowed --- */
+
+/* Browsers cap localStorage at around 5MB, and a long solve history gets
+   there. Logging the failure and carrying on means everything from that point
+   is lost on the next reload with nothing on screen saying so. */
+check('storage is fine to begin with', Store.storageBroken, false);
+
+const realSetItem = sandbox.localStorage.setItem;
+const realWarn = console.warn;
+console.warn = () => {};
+sandbox.localStorage.setItem = () => {
+  const err = new Error('exceeded the quota');
+  err.name = 'QuotaExceededError';
+  throw err;
+};
+Store.addNode({ parentId: null, name: 'Past the wall' });
+check('a failed save is remembered',        Store.storageBroken, true);
+check('and the state can be measured',      Store.storedBytes() > 0, true);
+
+sandbox.localStorage.setItem = realSetItem;
+Store.addNode({ parentId: null, name: 'Room again' });
+console.warn = realWarn;
+check('and forgotten once saving works again', Store.storageBroken, false);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

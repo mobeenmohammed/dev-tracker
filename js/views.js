@@ -396,7 +396,7 @@ const Views = (() => {
     /* Only topics that can actually be connected are offered — nothing that
        would make the tree contain itself, and nothing already drawn below
        this one — so a connection is never chosen and then silently refused. */
-    const candidates = Store.state.nodes.filter(n => Store.canConnect(n.id, node.id));
+    const candidates = Store.connectableInto(node.id);
 
     const form = document.createElement('form');
     form.className = 'ref-add conn-add';
@@ -707,6 +707,17 @@ const Views = (() => {
           parentId: f.get('parentId') || null,
           tags:     String(f.get('tags')).split(',').map(t => t.trim()).filter(Boolean),
         });
+        /* Moving a branch can make a connection impossible to draw, and the
+           store drops it rather than refusing the move. Saying nothing would
+           mean a connection quietly disappearing on an unrelated edit. */
+        const dropped = Store.lastPrunedConnections;
+        if (dropped) {
+          const hint = form.querySelector('#saveHint');
+          hint.textContent = dropped === 1
+            ? 'Moved — one connection could not survive it and was removed.'
+            : `Moved — ${dropped} connections could not survive it and were removed.`;
+          hint.style.color = 'var(--st-learning)';
+        }
         onChanged();
       } catch (err) {
         const hint = form.querySelector('#saveHint');
