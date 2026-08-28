@@ -1196,6 +1196,36 @@ check('a field at the far end of the strip opens',
 check('and its tab is marked active',
       tabNamed(lastField.name).classList.contains('is-active'));
 
+/* ---------- 12. deleting the field you are looking at ---------- */
+
+/* This used to strand the canvas on a made-up "My Learning Tree" card: the
+   tab and the tree stayed rooted on a field that no longer existed, and the
+   only thing left to draw was a stand-in for it. */
+const doomed = Store.addNode({ parentId: null, name: 'Temporary Field' });
+click(tabNamed('All'));                       // rebuild the bar so its tab exists
+click(tabNamed('Temporary Field'));
+check('the temporary field opens', Tree.rootId === doomed.id, String(Tree.rootId));
+
+clickNode('Temporary Field');
+click($('#deleteBtn'));
+
+check('the field is gone', !Store.byId(doomed.id));
+check('the tree falls back to All', Tree.rootId === null, String(Tree.rootId));
+check('which is the graph, not a tree of nothing', Tree.isGraph === true);
+check('the All tab is the active one', tabNamed('All').classList.contains('is-active'));
+check('no tab is left for the deleted field', !tabNamed('Temporary Field'));
+check('and nothing persisted points at it',
+      JSON.parse(window.localStorage.getItem('learning-tree/ui/v1')).activeField === null,
+      window.localStorage.getItem('learning-tree/ui/v1'));
+
+/* Nothing anywhere invents a card that is not a topic. */
+const profileName = Store.state.profile.name;
+check('no card stands in for the whole tree',
+      treeNodes().every(el => nodeLabel(el) !== profileName), profileName);
+check('every card drawn is a real topic',
+      treeNodes().every(el => !!Store.state.nodes.find(n => n.name === nodeLabel(el))),
+      treeNodes().map(nodeLabel).filter(l => !Store.state.nodes.some(n => n.name === l)).join(','));
+
 if (errors.length) {
   console.log('--- runtime errors ---');
   errors.forEach(e => console.log('  ' + e));

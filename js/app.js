@@ -188,7 +188,18 @@
      used to happen once there were more fields than the bar was wide. */
   let scrolledTo;                 // the field the strip was last scrolled to
 
+  /* A field can vanish while it is open — deleted from the inspector, or
+     replaced wholesale by an import. Every route that does it redraws the bar,
+     so the fallback to All lives here rather than in each of them. */
+  function forgetMissingField() {
+    if (!activeField || Store.byId(activeField)) return;
+    activeField = null;
+    Tree.setRoot(null);
+    persistUi();
+  }
+
   function renderTabs() {
+    forgetMissingField();
     const lead   = document.getElementById('fieldTabsLead');
     const strip  = document.getElementById('fieldTabsScroll');
     lead.replaceChildren();

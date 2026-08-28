@@ -8,7 +8,7 @@
 
 const Tree = (() => {
 
-  const ROOT_ID   = '__root__';
+
   const MIN_SCALE = 0.12;
   const MAX_SCALE = 3.5;
 
@@ -55,8 +55,8 @@ const Tree = (() => {
        than hanging the page. */
     const make = (node, depth, path, key, borrowed, connection) => {
       const isCollapsed = collapsed.has(node.id);
-      const rawKids  = node.id === ROOT_ID ? Store.roots() : Store.childrenOf(node.id);
-      const brought  = node.id === ROOT_ID ? [] : Store.connectedInto(node.id);
+      const rawKids  = Store.childrenOf(node.id);
+      const brought  = Store.connectedInto(node.id);
       const nextPath = new Set(path).add(node.id);
 
       const kids   = rawKids.filter(k => !nextPath.has(k.id));
@@ -68,7 +68,6 @@ const Tree = (() => {
         key,
         name:        node.name,
         status:      node.status,
-        isSynthetic: node.id === ROOT_ID,
         depth,
         /* borrowed: drawn inside a connected branch, wherever in it.
            graftRoot: the topic the connection actually names. */
@@ -86,15 +85,16 @@ const Tree = (() => {
       };
     };
 
-    const field = rootId ? Store.byId(rootId) : null;
-    if (field) return make(field, 0, new Set(), field.id, false, null);
-
-    const profile = Store.state.profile;
-    return make({ id: ROOT_ID, name: profile.name || 'Everything', status: 'mastered' },
-                0, new Set(), ROOT_ID, false, null);
+    /* setRoot only ever leaves a field that exists here, so this is a real
+       topic every time it is called. */
+    const field = Store.byId(rootId);
+    return make(field, 0, new Set(), field.id, false, null);
   }
 
-  const isGraphMode = () => rootId === null;
+  /* No field in focus means the All graph — and so does a field that is not
+     there any more, which is the honest answer rather than a tree of nothing
+     or a made-up card standing in for one. */
+  const isGraphMode = () => rootId === null || !Store.byId(rootId);
 
   const flatten = root => {
     const out = [];
@@ -184,7 +184,6 @@ const Tree = (() => {
       name: n.name,
       status: n.status,
       depth: Store.depthOf(n.id),
-      isSynthetic: false,
       borrowed: false,
       graftRoot: false,
       connectionId: null,
@@ -468,7 +467,7 @@ const Tree = (() => {
   }
 
   function activityOf(n) {
-    const worked = n.isSynthetic ? null : Store.lastWorked(n.id, true);
+    const worked = Store.lastWorked(n.id, true);
     return { worked, age: worked ? Store.daysBetween(worked, Store.todayISO()) : null };
   }
 
@@ -488,10 +487,10 @@ const Tree = (() => {
     });
 
     const card = html('div', 'card');
-    card.style.setProperty('--card-color', n.isSynthetic ? 'var(--accent)' : statusColor(n.status));
+    card.style.setProperty('--card-color', statusColor(n.status));
     if (n.id === selectedId) card.classList.add('is-selected');
     if (matches(n.name)) card.classList.add('is-match');
-    if (!n.isSynthetic && Store.isPrivate(n.id)) card.classList.add('is-private');
+    if (Store.isPrivate(n.id)) card.classList.add('is-private');
     /* A borrowed card must never read as a topic of this tree, so it is
        tinted and outlined differently and the branch head says where it
        came from. */
@@ -517,35 +516,29 @@ const Tree = (() => {
     const { worked, age } = activityOf(n);
     const meta = html('div', 'card-meta');
 
-    if (n.isSynthetic) {
-      const count = html('span', 'card-status');
-      count.textContent = Store.roots().length + ' fields';
-      meta.appendChild(count);
-    } else {
-      const status = html('span', 'card-status');
-      status.textContent = Store.STATUS_BY_ID[n.status].label;
-      meta.appendChild(status);
+    const status = html('span', 'card-status');
+    status.textContent = Store.STATUS_BY_ID[n.status].label;
+    meta.appendChild(status);
 
-      const list = Store.checklistOf(n.id);
-      if (list.total) {
-        const chk = html('span', 'card-check');
-        chk.textContent = `${list.done}/${list.total}`;
-        chk.title = `${list.done} of ${list.total} checklist items done`;
-        meta.appendChild(chk);
-      }
+    const list = Store.checklistOf(n.id);
+    if (list.total) {
+      const chk = html('span', 'card-check');
+      chk.textContent = `${list.done}/${list.total}`;
+      chk.title = `${list.done} of ${list.total} checklist items done`;
+      meta.appendChild(chk);
+    }
 
-      if (showActivity) {
-        const when = html('span', 'card-when' + (age !== null && age <= 7 ? ' is-fresh' : ''));
-        when.textContent = worked ? Store.relativeDay(worked) : 'not started';
-        meta.appendChild(when);
-      }
+    if (showActivity) {
+      const when = html('span', 'card-when' + (age !== null && age <= 7 ? ' is-fresh' : ''));
+      when.textContent = worked ? Store.relativeDay(worked) : 'not started';
+      meta.appendChild(when);
+    }
 
-      const minutes = Store.minutesFor(n.id, true);
-      if (minutes) {
-        const time = html('span', 'card-time');
-        time.textContent = minutes >= 60 ? Math.round(minutes / 60) + 'h' : minutes + 'm';
-        meta.appendChild(time);
-      }
+    const minutes = Store.minutesFor(n.id, true);
+    if (minutes) {
+      const time = html('span', 'card-time');
+      time.textContent = minutes >= 60 ? Math.round(minutes / 60) + 'h' : minutes + 'm';
+      meta.appendChild(time);
     }
     body.appendChild(meta);
 
@@ -556,7 +549,7 @@ const Tree = (() => {
     body.appendChild(bar);
 
     card.appendChild(body);
-    if (!n.isSynthetic) card.appendChild(cardActions(n));
+    card.appendChild(cardActions(n));
     card.appendChild(foldControl(n));
 
     card.addEventListener('pointerdown', ev => {
@@ -804,14 +797,13 @@ const Tree = (() => {
   /* ---------------- selection and collapsing ---------------- */
 
   function select(id) {
-    selectedId = id === ROOT_ID ? null : id;
+    selectedId = id || null;
     if (editingId && editingId !== selectedId) editingId = null;
     render();
     onSelect(selectedId);
   }
 
   function toggleCollapse(id) {
-    if (id === ROOT_ID) return;
     if (!Store.byId(id) || !Store.childrenOf(id).length) return;
     collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
     render();
@@ -830,8 +822,11 @@ const Tree = (() => {
     pendingFit = requestAnimationFrame(() => { pendingFit = 0; fit(); });
   }
 
+  /* A field that no longer exists is the All view, not a tree of nothing.
+     Without this, deleting the field you were looking at left the canvas
+     rooted on a ghost. */
   function setRoot(fieldId) {
-    rootId = fieldId || null;
+    rootId = fieldId && Store.byId(fieldId) ? fieldId : null;
     render();
     queueFit();
   }
