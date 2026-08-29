@@ -101,6 +101,9 @@ const Store = (() => {
       /* `resources` was the old name, before entries could be ticked off. */
       items:     normalizeItems(n.items && n.items.length ? n.items : n.resources),
       private:   !!n.private,
+      /* Which folder this field sits on, if any. Only meaningful on a field:
+         a sub-topic already has a place. */
+      folderId:  n.parentId == null && n.folderId ? String(n.folderId) : null,
       /* Optional: how many solved problems count as knowing this topic. */
       problemTarget: Number(n.problemTarget) > 0 ? Number(n.problemTarget) : 0,
       /* A vault note this topic corresponds to, opened through obsidian://. */
@@ -196,6 +199,14 @@ const Store = (() => {
         connections.push(c);
       });
 
+    /* Folders are deduplicated by id, and a field pointing at one that is not
+       here comes back to the top level rather than vanishing into nothing. */
+    const seenFolders = new Set();
+    const folders = (Array.isArray(raw.folders) ? raw.folders : [])
+      .map(normalizeFolder)
+      .filter(f => !seenFolders.has(f.id) && seenFolders.add(f.id));
+    nodes.forEach(n => { if (n.folderId && !seenFolders.has(n.folderId)) n.folderId = null; });
+
     const applications = (Array.isArray(raw.applications) ? raw.applications : [])
       .map(normalizeApplication)
       .filter(a => a.company);
@@ -215,6 +226,7 @@ const Store = (() => {
         subtitle: (raw.profile && raw.profile.subtitle) || '',
       },
       nodes,
+      folders,
       sessions,
       focus,
       problems,
@@ -750,6 +762,81 @@ const Store = (() => {
                                 incoming: state.links.filter(l => l.to === nodeId) };
     return [...new Set([...out.map(l => l.to), ...incoming.map(l => l.from)])];
   };
+
+  /* ---------------- folders: shelves for fields ----------------
+
+     A folder is not a topic and never appears in a tree. Making it one would
+     turn the fields inside it into sub-topics of it, which is exactly what a
+     field is not: fields are separate trees. So a folder is a name and an
+     order, and each field says which one it sits on. Nothing else in the app
+     knows folders exist — they are a way of finding a field, not a way of
+     organising knowledge. */
+
+  function normalizeFolder(f) {
+    return {
+      id:   String(f.id || uid('d')),
+      name: String(f.name || 'Folder').trim() || 'Folder',
+    };
+  }
+
+  const folders = () => state.folders;
+
+  function addFolder(name = 'New folder') {
+    const folder = normalizeFolder({ id: uid('d'), name });
+    state.folders.push(folder);
+    persist();
+    return folder;
+  }
+
+  function renameFolder(id, name) {
+    const folder = state.folders.find(f => f.id === id);
+    if (!folder) return null;
+    const clean = String(name || '').trim();
+    if (!clean) return folder;
+    folder.name = clean;
+    persist();
+    return folder;
+  }
+
+  /* Removing a shelf must never remove what was on it: the fields come back
+     out to the top level, which is where they were before there were shelves. */
+  function deleteFolder(id) {
+    const had = state.folders.length;
+    state.folders = state.folders.filter(f => f.id !== id);
+    if (state.folders.length === had) return 0;
+
+    let freed = 0;
+    state.nodes.forEach(n => {
+      if (n.folderId === id) { n.folderId = null; freed++; }
+    });
+    persist();
+    return freed;
+  }
+
+  /* Only a field can be on a shelf. A sub-topic already sits somewhere. */
+  function setNodeFolder(nodeId, folderId) {
+    const node = byId(nodeId);
+    if (!node || node.parentId !== null) return null;
+    if (folderId && !state.folders.some(f => f.id === folderId)) return null;
+    node.folderId = folderId || null;
+    persist();
+    return node;
+  }
+
+  /* The fields, arranged the way they are meant to be read: each folder with
+     what is on it, then everything still loose, in the order they were made. */
+  function fieldGroups() {
+    const loose = [];
+    const byFolder = new Map(state.folders.map(f => [f.id, []]));
+    roots().forEach(field => {
+      const shelf = field.folderId && byFolder.get(field.folderId);
+      (shelf || loose).push(field);
+    });
+    return {
+      folders: state.folders.map(f => ({ folder: f, fields: byFolder.get(f.id) || [] })),
+      loose,
+    };
+  }
 
   /* ---------------- connections: one branch shown inside another ----------
 
@@ -1982,25 +2069,34 @@ const Store = (() => {
          and say where it is shown, which is the same leak by another route. */
       connections: state.connections.filter(c =>
         (priv.has(c.from) || priv.has(c.to)) === wantPrivate),
+      /* A folder is a name someone chose, so it follows what is on it. One
+         holding nothing but private fields is a label for private work and
+         stays out of the public file; an empty one names nothing and is safe
+         to publish, which is what keeps a new folder syncing between
+         devices. */
+      folders: state.folders.filter(f => {
+        const on = state.nodes.filter(n => n.folderId === f.id);
+        return on.length ? on.some(n => priv.has(n.id) === wantPrivate) : !wantPrivate;
+      }),
       /* Applications only ever exist in the private half. */
       applications: wantPrivate ? state.applications : [],
     };
   }
 
   function toJSON() {
-    const { nodes, sessions, focus, problems, links, connections, journal, goals, projects } = partition(false);
+    const { nodes, folders, sessions, focus, problems, links, connections, journal, goals, projects } = partition(false);
     return JSON.stringify({
       version: state.version, updatedAt: state.updatedAt, profile: state.profile,
-      nodes, links, connections, sessions, focus, problems, journal, goals, projects,
+      nodes, folders, links, connections, sessions, focus, problems, journal, goals, projects,
       tagMap: state.tagMap, sources: state.sources,
     }, null, 2);
   }
 
   function toPrivateJSON() {
-    const { nodes, sessions, focus, problems, applications, links, connections, journal, projects } = partition(true);
+    const { nodes, folders, sessions, focus, problems, applications, links, connections, journal, projects } = partition(true);
     return JSON.stringify({
       version: state.version, updatedAt: state.updatedAt, private: true,
-      nodes, links, connections, sessions, focus, problems, journal, projects, applications,
+      nodes, folders, links, connections, sessions, focus, problems, journal, projects, applications,
     }, null, 2);
   }
 
@@ -2035,6 +2131,7 @@ const Store = (() => {
     const haveApps     = new Set(state.applications.map(x => x.id));
     const haveLinks    = new Set(state.links.map(x => x.id));
     const haveConns    = new Set(state.connections.map(x => x.id));
+    const haveFolders  = new Set(state.folders.map(x => x.id));
     const haveJournal  = new Set(state.journal.map(x => x.id));
     const haveGoals    = new Set(state.goals.map(x => x.id));
     const haveProjects = new Set(state.projects.map(x => x.id));
@@ -2043,6 +2140,8 @@ const Store = (() => {
       version:  state.version,
       profile:  state.profile,
       nodes:    [...state.nodes, ...parsed.nodes.filter(n => !byId(String(n.id)))],
+      folders:  [...state.folders,
+        ...(parsed.folders || []).filter(x => !haveFolders.has(String(x.id)))],
       sessions: [...state.sessions, ...(parsed.sessions || []).filter(x => !haveSessions.has(String(x.id)))],
       focus:    [...state.focus, ...(parsed.focus || []).filter(x => !haveFocus.has(String(x.id)))],
       problems: [...state.problems, ...(parsed.problems || []).filter(x => !haveProblems.has(String(x.id)))],
@@ -2107,6 +2206,7 @@ const Store = (() => {
     tagIndex, setTagMapping, nodeForTags,
     isPrivate, privateNodeIds,
     addLink, updateLink, deleteLink, linksFor, relatedTo, LINK_TYPES, prerequisiteWarnings,
+    folders, addFolder, renameFolder, deleteFolder, setNodeFolder, fieldGroups,
     addConnection, deleteConnection, connectionsFor, connectedInto,
     canConnect, connectableInto,
     get lastPrunedConnections() { return lastPruned; },

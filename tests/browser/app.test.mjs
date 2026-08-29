@@ -1366,6 +1366,129 @@ window.Storage.prototype.setItem = realSetItem;
 Store.updateNode(Store.roots()[0].id, { name: Store.roots()[0].name });
 check('and it clears once saving works again', $('#storageWarning').hidden);
 
+/* ---------- 16. folders in the picker ---------- */
+
+/* Fields are separate trees, so a folder cannot be a node: it is a shelf you
+   find them on, and it lives in the picker rather than on the canvas. */
+const shelf = Store.addFolder('Number Shelf');
+Store.setNodeFolder('math', shelf.id);
+Store.setNodeFolder('hpc', shelf.id);
+click(tabNamed('All'));
+click($('#fieldPickerBtn'));
+
+const pickerRow = sel => $$('#fieldPickerList ' + sel);
+const rowNames = () => pickerRow('.picker-row').map(r => r.querySelector('.picker-name').textContent);
+
+check('the folder is listed', rowNames().includes('Number Shelf'), rowNames().join(' | '));
+check('and it is a folder, not a field',
+      pickerRow('.picker-folder').length === 1, `${pickerRow('.picker-folder').length}`);
+check('it says how many are on it',
+      /2 fields/.test($('#fieldPickerList .picker-folder .picker-meta').textContent),
+      $('#fieldPickerList .picker-folder .picker-meta').textContent);
+check('a shelved field is not shown while it is closed',
+      !rowNames().includes('High Performance Computing'), rowNames().join(' | '));
+check('the loose fields still are', rowNames().includes('C++'), rowNames().join(' | '));
+
+/* opening it reveals what is on it */
+const folderRow = $('#fieldPickerList .picker-folder');
+click(folderRow);
+check('opening it shows the fields on it',
+      rowNames().includes('High Performance Computing') && rowNames().includes('Number Shelf'), rowNames().join(' | '));
+check('they are drawn as belonging to it',
+      pickerRow('.picker-row.is-shelved').length === 2,
+      `${pickerRow('.picker-row.is-shelved').length}`);
+check('and the caret says it is open',
+      $('#fieldPickerList .picker-folder').classList.contains('is-expanded'));
+
+/* and they open like any other field */
+const shelved = pickerRow('.picker-row.is-shelved').find(r => r.dataset.field === 'hpc');
+click(shelved);
+check('a field opens from inside a folder', Tree.rootId === 'hpc', String(Tree.rootId));
+check('the picker closed behind it', $('#fieldPicker').hidden);
+
+/* closing hides them again */
+click($('#fieldPickerBtn'));
+click($('#fieldPickerList .picker-folder'));
+check('closing hides them again', pickerRow('.picker-row.is-shelved').length === 0,
+      `${pickerRow('.picker-row.is-shelved').length} still shown`);
+
+/* searching must not let a closed folder hide the only match */
+const box = $('#fieldPickerSearch');
+box.value = 'High Perf';
+fire(box, 'input');
+check('a search opens the folder holding the match',
+      rowNames().includes('High Performance Computing'), rowNames().join(' | '));
+check('and the folder is shown above it',
+      rowNames()[0] === 'Number Shelf', rowNames().join(' | '));
+box.value = '';
+fire(box, 'input');
+
+/* keyboard: right opens, left closes, Enter toggles */
+pickerRow('.picker-folder')[0].dispatchEvent(new window.MouseEvent('mousemove', { bubbles: true }));
+key(box, 'ArrowRight');
+check('right opens a folder', pickerRow('.picker-row.is-shelved').length === 2,
+      `${pickerRow('.picker-row.is-shelved').length}`);
+key(box, 'ArrowLeft');
+check('left closes it', pickerRow('.picker-row.is-shelved').length === 0,
+      `${pickerRow('.picker-row.is-shelved').length}`);
+key(box, 'Enter');
+check('Enter on a folder opens it rather than jumping anywhere',
+      pickerRow('.picker-row.is-shelved').length === 2 && !$('#fieldPicker').hidden,
+      `${pickerRow('.picker-row.is-shelved').length} shelved, hidden=${$('#fieldPicker').hidden}`);
+
+/* a new folder is named in the list, so the picker stays open for it */
+click($('#fieldPickerNewFolder'));
+check('naming a new folder happens in the list', !!$('#fieldPickerList .picker-rename'));
+check('and the picker stayed open', !$('#fieldPicker').hidden);
+const nameBox = $('#fieldPickerList .picker-rename');
+nameBox.value = 'Systems';
+key(nameBox, 'Enter');
+check('the folder is made', Store.folders().map(f => f.name).includes('Systems'),
+      Store.folders().map(f => f.name).join(','));
+check('and it starts open', rowNames().includes('Systems'), rowNames().join(' | '));
+
+/* removing a shelf never removes what was on it */
+const fieldsBefore = Store.roots().length;
+const mathsRow = pickerRow('.picker-folder').find(r => /Number Shelf/.test(r.textContent));
+click(mathsRow.querySelector('.picker-del'));
+check('removing the folder keeps every field', Store.roots().length === fieldsBefore,
+      `${Store.roots().length} vs ${fieldsBefore}`);
+check('and puts them back at the top level',
+      Store.byId('hpc').folderId === null, String(Store.byId('hpc').folderId));
+check('the folder is gone from the list', !rowNames().includes('Number Shelf'),
+      rowNames().join(' | '));
+click(doc.body);
+
+/* A field is filed from its own Details panel, where everything else about
+   where a topic sits is edited. */
+const filing = Store.addFolder('Filing');
+window.Views.renderInspector('cpp');
+const folderSelect = $('#f-folder');
+check('a field can be filed from its details', !!folderSelect);
+check('the folders are offered',
+      [...folderSelect.options].some(o => o.textContent === 'Filing'),
+      [...folderSelect.options].map(o => o.textContent).join(','));
+folderSelect.value = filing.id;
+$('#detailsForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('choosing one files it', Store.byId('cpp').folderId === filing.id,
+      String(Store.byId('cpp').folderId));
+check('without moving it in the tree', Store.byId('cpp').parentId === null,
+      String(Store.byId('cpp').parentId));
+
+/* A sub-topic already has a place, so it is not offered one. */
+window.Views.renderInspector('cpp-move');
+check('a sub-topic is not offered a folder', !$('#f-folder'));
+
+/* The strip reads folder by folder, so a folder's fields sit together. */
+click(tabNamed('All'));
+const stripOrder = $$('#fieldTabsScroll .tab').map(t => t.dataset.field);
+const filed = Store.roots().filter(r => r.folderId === filing.id).map(r => r.id);
+check('the strip puts a folder\u2019s fields first',
+      stripOrder.slice(0, filed.length).sort().join() === filed.sort().join(),
+      stripOrder.slice(0, 3).join(','));
+Store.deleteFolder(filing.id);
+click(tabNamed('All'));
+
 if (errors.length) {
   console.log('--- runtime errors ---');
   errors.forEach(e => console.log('  ' + e));

@@ -69,6 +69,20 @@ check('and the fixed views cannot be squeezed out of it',
 check('nor All and the new-field button',
       /\.tabs-pinned\s*\{[^}]*flex:\s*none/.test(css));
 
+/* A folder must not read as a field, or the list stops being scannable. */
+const probeRow = cls => {
+  const el = doc.createElement('button');
+  el.className = cls;
+  doc.querySelector('#fieldPickerList').appendChild(el);
+  return window.getComputedStyle(el);
+};
+check('a folder row is set apart from a field row',
+      /\.picker-folder\s+\.picker-name\s*\{[^}]*text-transform:\s*uppercase/.test(css));
+check('and the fields on it are indented under it',
+      /\.picker-row\.is-shelved\s*\{[^}]*padding-left/.test(css));
+check('the indent rail can be positioned against the row',
+      probeRow('picker-row').position === 'relative');
+
 /* The picker hangs below the bar rather than taking room inside it. */
 check('the picker is taken out of the flow',
       window.getComputedStyle(doc.querySelector('#fieldPicker')).position === 'absolute');

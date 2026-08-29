@@ -1106,5 +1106,78 @@ Store.addNode({ parentId: null, name: 'Room again' });
 console.warn = realWarn;
 check('and forgotten once saving works again', Store.storageBroken, false);
 
+/* --- folders: shelves for fields, and nothing to do with the trees --- */
+
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'analysis', parentId: null,       name: 'Analysis' },
+    { id: 'seq',      parentId: 'analysis', name: 'Sequences' },
+    { id: 'pure',     parentId: null,       name: 'Pure Maths' },
+    { id: 'cpp',      parentId: null,       name: 'C++' },
+  ],
+}));
+check('no folders to begin with', Store.folders().length, 0);
+
+const maths = Store.addFolder('Mathematics');
+check('a folder can be made',            !!maths.id, true);
+check('filing a field on it works',      !!Store.setNodeFolder('analysis', maths.id), true);
+check('and a second',                    !!Store.setNodeFolder('pure', maths.id), true);
+check('the field has not moved in the tree', Store.byId('analysis').parentId, null);
+check('it is still a field',             Store.roots().map(r => r.id), ['analysis', 'pure', 'cpp']);
+check('and still has its own branch',    Store.childrenOf('analysis').map(n => n.id), ['seq']);
+
+const grouped = Store.fieldGroups();
+check('the folder knows what is on it',
+      grouped.folders.map(g => [g.folder.name, g.fields.map(f => f.id)]),
+      [['Mathematics', ['analysis', 'pure']]]);
+check('and the rest are loose',          grouped.loose.map(f => f.id), ['cpp']);
+
+/* a folder is for fields; a sub-topic already has a place */
+check('a sub-topic cannot be filed',     Store.setNodeFolder('seq', maths.id), null);
+check('nor can a field go on a folder that is not there',
+      Store.setNodeFolder('cpp', 'no-such-folder'), null);
+
+check('a folder can be renamed',         Store.renameFolder(maths.id, 'Maths').name, 'Maths');
+check('an empty name is refused',        Store.renameFolder(maths.id, '   ').name, 'Maths');
+
+/* removing a shelf must never remove what was on it */
+check('removing it frees its fields',    Store.deleteFolder(maths.id), 2);
+check('the fields are all still there',  Store.roots().length, 3);
+check('and back at the top level',
+      Store.roots().map(r => r.folderId), [null, null, null]);
+check('removing it again does nothing',  Store.deleteFolder(maths.id), 0);
+
+/* a field whose folder is gone comes back out rather than pointing at nothing */
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'x', parentId: null, name: 'X', folderId: 'ghost' },
+          { id: 'y', parentId: null, name: 'Y', folderId: 'real' }],
+  folders: [{ id: 'real', name: 'Real' }, { id: 'real', name: 'Duplicate' }],
+}));
+check('a duplicate folder is dropped',   Store.folders().map(f => f.id), ['real']);
+check('a field on a missing folder comes loose', Store.byId('x').folderId, null);
+check('one on a real folder stays',      Store.byId('y').folderId, 'real');
+
+/* a folder holding only private fields is a label for private work */
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'open',   parentId: null, name: 'Open',   folderId: 'shared' },
+    { id: 'hidden', parentId: null, name: 'Hidden', folderId: 'quiet', private: true },
+  ],
+  folders: [{ id: 'shared', name: 'Shared' }, { id: 'quiet', name: 'Quiet' },
+            { id: 'blank', name: 'Blank' }],
+}));
+check('the public file keeps the folder with a public field on it',
+      JSON.parse(Store.toJSON()).folders.map(f => f.id), ['shared', 'blank']);
+check('and never names the one holding only private work',
+      Store.toJSON().includes('Quiet'), false);
+check('the private file keeps that one',
+      JSON.parse(Store.toPrivateJSON()).folders.map(f => f.id), ['quiet']);
+
+/* merging the same file twice must not double the folders */
+const twiceOver = Store.toPrivateJSON();
+Store.mergeJSON(twiceOver);
+Store.mergeJSON(twiceOver);
+check('merging is idempotent for folders', Store.folders().length, 3);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

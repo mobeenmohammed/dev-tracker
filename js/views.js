@@ -691,6 +691,15 @@ const Views = (() => {
             `<option value="${esc(o.id)}" ${o.id === (node.parentId || '') ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}
         </select>
       </div>
+      ${node.parentId === null ? `
+      <div class="field">
+        <label for="f-folder">Folder <span class="muted">(where it is filed, not where it sits)</span></label>
+        <select id="f-folder" name="folderId">
+          <option value="">&mdash; no folder &mdash;</option>
+          ${Store.folders().map(d =>
+            `<option value="${esc(d.id)}" ${d.id === (node.folderId || '') ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}
+        </select>
+      </div>` : ''}
       <div class="field">
         <label for="f-tags">Tags <span class="muted">(comma separated)</span></label>
         <input id="f-tags" name="tags" type="text" value="${esc(node.tags.join(', '))}">
@@ -707,6 +716,11 @@ const Views = (() => {
           parentId: f.get('parentId') || null,
           tags:     String(f.get('tags')).split(',').map(t => t.trim()).filter(Boolean),
         });
+        /* Filing is separate from parentage: a folder is where a field is
+           found, not something it sits under, and only a field has one. */
+        if (form.querySelector('#f-folder') && !f.get('parentId')) {
+          Store.setNodeFolder(node.id, f.get('folderId') || null);
+        }
         /* Moving a branch can make a connection impossible to draw, and the
            store drops it rather than refusing the move. Saying nothing would
            mean a connection quietly disappearing on an unrelated edit. */

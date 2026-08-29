@@ -49,6 +49,39 @@ close — and it drops *below* the bar, so the views pinned beside it stay
 visible and clickable while it is open. Starting a new field is at the bottom
 of the same panel.
 
+#### Folders
+
+Fields can be filed on **folders**, which live in the picker. A folder is a
+collapsible heading with the fields on it underneath, so twenty fields read as
+four groups rather than one long list.
+
+A folder is *not* a topic and never appears on a canvas. Making it one would
+turn the fields on it into its sub-topics, which is the one thing a field is
+not — fields are separate trees. So a folder is a name and nothing else, and
+each field remembers which one it is filed on. Filing a field changes where you
+*find* it, never where it *sits*: its tree, its status, its progress and its
+tab are all exactly as they were.
+
+- **Make one** with *+ New folder* at the bottom of the picker; you name it in
+  the list, and the picker stays open so you can carry on.
+- **File a field** on it from that field's **Details** panel, where everything
+  else about where a topic sits is edited.
+- **Open and close** a folder by clicking it, or with → and ← from the
+  keyboard; Enter on a folder opens it rather than jumping anywhere. Which
+  folders are open is remembered between visits, and the folder holding the
+  field you are on always opens.
+- **Searching opens folders**, because a closed one hiding the only match would
+  look like no match at all.
+- **Rename** by double-clicking a folder; **remove** it with the × on its row.
+  Removing a folder never removes a field — they come back to the top level.
+
+The tab strip reads in the same order, folder by folder, so a folder's fields
+sit next to each other rather than scattered along it.
+
+A folder holding nothing but private fields is a label for private work, so its
+name stays out of the public snapshot. One with any public field on it, or one
+holding nothing at all, is published like anything else.
+
 ### The tree, and the graph
 
 A **field tab** shows that field as a top-down tidy tree: the field at the top,
@@ -511,7 +544,18 @@ a topic shows up as a one-line diff.
   "status": "planned", "tags": ["gpu"], "notes": "", "resources": [] }
 ```
 
-A node with `"parentId": null` is a top-level field. Sessions reference a node by id:
+A node with `"parentId": null` is a top-level field. A field may also name the
+folder it is filed on, which is only about where it is found:
+
+```json
+{ "id": "math", "parentId": null, "name": "Mathematics", "folderId": "d3" }
+```
+
+```json
+{ "id": "d3", "name": "Sciences" }
+```
+
+Sessions reference a node by id:
 
 ```json
 { "id": "s12", "nodeId": "hpc-roofline", "date": "2026-08-21",

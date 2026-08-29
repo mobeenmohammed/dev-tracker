@@ -29,6 +29,7 @@
         showActivity: Tree.showActivity,
         showRefs: Tree.showRefs,
         inspectorWidth,
+        openFolders: [...openFolders],
       }));
     } catch { /* private mode */ }
   }
@@ -47,6 +48,7 @@
     showActivity = saved.showActivity !== false;
     showRefs = saved.showRefs !== false;
     if (Number.isFinite(saved.inspectorWidth)) inspectorWidth = saved.inspectorWidth;
+    if (Array.isArray(saved.openFolders)) openFolders = new Set(saved.openFolders.map(String));
   }
 
   /* ---------------- resizable inspector ---------------- */
@@ -268,8 +270,17 @@
     add.addEventListener('click', startNewField);
     lead.appendChild(add);
 
-    const fields = Store.roots();
-    fields.forEach(field => strip.appendChild(tab(field.name, { fieldId: field.id })));
+    /* Filed fields first, folder by folder, then the loose ones — so the strip
+       reads in the same order as the picker and a folder's fields are next to
+       each other rather than scattered along it. */
+    const groups = Store.fieldGroups();
+    const fields = [...groups.folders.flatMap(g => g.fields), ...groups.loose];
+    fields.forEach(field => {
+      const el = tab(field.name, { fieldId: field.id });
+      const folder = field.folderId && Store.folders().find(d => d.id === field.folderId);
+      if (folder) el.title = folder.name + ' \u00b7 ' + el.title;
+      strip.appendChild(el);
+    });
 
     const count = document.getElementById('fieldPickerCount');
     if (count) count.textContent = fields.length === 1 ? '1 field' : fields.length + ' fields';
@@ -310,12 +321,46 @@
      picker answers that: every field in one list, filterable, keyboard-driven,
      and dropped below the bar so it never covers the views pinned beside it. */
   let pickerIndex = 0;
+  let openFolders = new Set();      // folders expanded in the picker
 
+  /* One flat list of what is actually on screen: All, then each folder header
+     followed by its fields when it is open, then the fields on no folder.
+     Flattening it here is what lets the keyboard walk it without knowing
+     anything about the nesting. */
   function pickerRows() {
     const box = document.getElementById('fieldPickerSearch');
     const q = (box.value || '').trim().toLowerCase();
-    const all = [{ id: null, name: 'All', isAll: true }, ...Store.roots()];
-    return all.filter(f => !q || f.name.toLowerCase().includes(q));
+    const hit = field => !q || field.name.toLowerCase().includes(q);
+
+    const rows = [];
+    if (hit({ name: 'All' })) rows.push({ kind: 'all', id: null, name: 'All' });
+
+    const { folders, loose } = Store.fieldGroups();
+    folders.forEach(({ folder, fields }) => {
+      const matches = fields.filter(hit);
+      /* A folder whose own name matches shows everything on it; otherwise it
+         shows what matched. Searching opens folders, because a closed one
+         hiding the only hit would look like no hit at all. */
+      const named = q && folder.name.toLowerCase().includes(q);
+      const shown = named ? fields : matches;
+      if (q && !named && !matches.length) return;
+
+      const open = q ? true : openFolders.has(folder.id);
+      rows.push({ kind: 'folder', id: folder.id, name: folder.name,
+                  count: fields.length, open });
+      if (open) shown.forEach(f => rows.push({ kind: 'field', id: f.id, name: f.name,
+                                               status: f.status, inFolder: true }));
+    });
+
+    loose.filter(hit).forEach(f => rows.push({ kind: 'field', id: f.id, name: f.name,
+                                               status: f.status, inFolder: false }));
+    return rows;
+  }
+
+  function toggleFolder(id) {
+    if (openFolders.has(id)) openFolders.delete(id); else openFolders.add(id);
+    persistUi();
+    renderPickerList();
   }
 
   function renderPickerList() {
@@ -326,36 +371,69 @@
     if (!rows.length) {
       const empty = document.createElement('p');
       empty.className = 'muted picker-empty';
-      empty.textContent = 'No field by that name.';
+      empty.textContent = 'Nothing by that name.';
       list.appendChild(empty);
       return;
     }
 
     pickerIndex = Math.max(0, Math.min(pickerIndex, rows.length - 1));
 
-    rows.forEach((field, i) => {
+    rows.forEach((entry, i) => {
       const row = document.createElement('button');
-      row.className = 'picker-row';
+      row.className = 'picker-row picker-' + entry.kind;
       row.setAttribute('role', 'option');
-      row.dataset.field = field.id || '';
+      row.dataset.field = entry.kind === 'field' ? entry.id : '';
+      if (entry.kind === 'folder') row.dataset.folder = entry.id;
+      if (entry.inFolder) row.classList.add('is-shelved');
       if (i === pickerIndex) row.classList.add('is-cursor');
 
-      const open = currentView === 'tree' && (field.id || null) === activeField;
-      row.classList.toggle('is-open', open);
-      row.setAttribute('aria-selected', String(open));
+      const isOpen = entry.kind !== 'folder'
+        && currentView === 'tree' && (entry.id || null) === activeField;
+      row.classList.toggle('is-open', isOpen);
+      row.setAttribute('aria-selected', String(isOpen));
 
-      if (field.isAll) {
+      if (entry.kind === 'all') {
         row.innerHTML = '<span class="glyph">&#9678;</span><span class="picker-name">All</span>' +
           '<span class="picker-meta">' + Store.roots().length + ' fields</span>';
+      } else if (entry.kind === 'folder') {
+        row.classList.toggle('is-expanded', entry.open);
+        row.setAttribute('aria-expanded', String(entry.open));
+        row.innerHTML =
+          '<span class="picker-caret">' + (entry.open ? '&#9662;' : '&#9656;') + '</span>' +
+          '<span class="picker-name">' + escapeHtml(entry.name) + '</span>' +
+          '<span class="picker-meta">' +
+            (entry.count === 1 ? '1 field' : entry.count + ' fields') + '</span>' +
+          '<span class="picker-del" role="button" tabindex="-1" ' +
+            'title="Remove this folder — the fields on it stay">&times;</span>';
+        row.title = 'Show or hide what is in ' + entry.name +
+                    ' \u2014 double-click to rename it';
+        row.querySelector('.picker-del').addEventListener('click', ev => {
+          ev.stopPropagation();
+          const freed = Store.deleteFolder(entry.id);
+          openFolders.delete(entry.id);
+          persistUi();
+          renderPickerList();
+          renderTabs();
+          toast(freed
+            ? `Folder removed — ${freed === 1 ? 'its field is' : 'its ' + freed + ' fields are'} back at the top level.`
+            : 'Folder removed.');
+        });
       } else {
         row.innerHTML =
-          '<span class="dot" style="background:var(' + Store.STATUS_BY_ID[field.status].cssVar + ')"></span>' +
-          '<span class="picker-name">' + escapeHtml(field.name) + '</span>' +
-          '<span class="picker-meta">' + Store.descendantsOf(field.id).length + ' topics</span>' +
-          '<span class="picker-pct">' + Math.round(Store.progressOf(field.id) * 100) + '%</span>';
+          '<span class="dot" style="background:var(' + Store.STATUS_BY_ID[entry.status].cssVar + ')"></span>' +
+          '<span class="picker-name">' + escapeHtml(entry.name) + '</span>' +
+          '<span class="picker-meta">' + Store.descendantsOf(entry.id).length + ' topics</span>' +
+          '<span class="picker-pct">' + Math.round(Store.progressOf(entry.id) * 100) + '%</span>';
       }
 
-      row.addEventListener('click', () => { closeFieldPicker(); openField(field.id); });
+      row.addEventListener('click', () => {
+        if (entry.kind === 'folder') { pickerIndex = i; toggleFolder(entry.id); return; }
+        closeFieldPicker();
+        openField(entry.id);
+      });
+      if (entry.kind === 'folder') {
+        row.addEventListener('dblclick', ev => { ev.stopPropagation(); renameFolderInline(row, entry); });
+      }
       row.addEventListener('mousemove', () => {
         if (pickerIndex === i) return;
         pickerIndex = i;
@@ -368,6 +446,77 @@
     if (cursor && typeof cursor.scrollIntoView === 'function') {
       cursor.scrollIntoView({ block: 'nearest' });
     }
+  }
+
+  /* Renaming happens over the row itself rather than in a prompt, the same way
+     renaming a card does. */
+  function renameFolderInline(row, entry) {
+    const label = row.querySelector('.picker-name');
+    if (!label) return;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'picker-rename';
+    input.value = entry.name;
+    input.setAttribute('aria-label', 'Folder name');
+    label.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let settled = false;
+    const finish = commit => {
+      if (settled) return;
+      settled = true;
+      if (commit) Store.renameFolder(entry.id, input.value);
+      renderPickerList();
+      renderTabs();
+    };
+    input.addEventListener('keydown', ev => {
+      ev.stopPropagation();
+      if (ev.key === 'Enter')  { ev.preventDefault(); finish(true); }
+      if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('click', ev => ev.stopPropagation());
+    input.addEventListener('dblclick', ev => ev.stopPropagation());
+  }
+
+  /* A new folder starts open and named, ready to have fields put on it. */
+  function startNewFolder() {
+    const list = document.getElementById('fieldPickerList');
+    const row = document.createElement('div');
+    row.className = 'picker-row picker-folder';
+    row.innerHTML = '<span class="picker-caret">&#9662;</span>';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'picker-rename';
+    input.placeholder = 'Folder name, e.g. Mathematics';
+    input.setAttribute('aria-label', 'Name of the new folder');
+    row.appendChild(input);
+    list.appendChild(row);
+    input.focus();
+
+    let settled = false;
+    const finish = commit => {
+      if (settled) return;
+      settled = true;
+      const name = input.value.trim();
+      if (commit && name) {
+        const folder = Store.addFolder(name);
+        openFolders.add(folder.id);
+        persistUi();
+        toast(`Made "${folder.name}" — put a field on it from its Details panel.`);
+      }
+      renderPickerList();
+    };
+    input.addEventListener('keydown', ev => {
+      ev.stopPropagation();
+      if (ev.key === 'Enter')  { ev.preventDefault(); finish(true); }
+      if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('click', ev => ev.stopPropagation());
   }
 
   function openFieldPicker() {
@@ -384,8 +533,14 @@
     panel.hidden = false;
     document.getElementById('fieldPickerBtn').setAttribute('aria-expanded', 'true');
     search.value = '';
+    /* The folder holding the open field is opened, or it would not be there
+       to start on. */
+    const current = activeField && Store.byId(activeField);
+    if (current && current.folderId) openFolders.add(current.folderId);
+
     /* Start on the field already open, so Enter on its own changes nothing. */
-    pickerIndex = Math.max(0, pickerRows().findIndex(f => (f.id || null) === activeField));
+    pickerIndex = Math.max(0, pickerRows()
+      .findIndex(r => r.kind !== 'folder' && (r.id || null) === activeField));
     renderPickerList();
     search.focus();
   }
@@ -457,12 +612,22 @@
         if (!rows.length) return;
         pickerIndex = (pickerIndex + (ev.key === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length;
         renderPickerList();
+      } else if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') {
+        /* Right opens a folder, left closes it — the one gesture everything
+           with a disclosure triangle uses. On a field they do nothing, so
+           the caret keeps working inside the search box. */
+        const entry = rows[pickerIndex];
+        if (!entry || entry.kind !== 'folder') return;
+        if (entry.open === (ev.key === 'ArrowRight')) return;
+        ev.preventDefault();
+        toggleFolder(entry.id);
       } else if (ev.key === 'Enter') {
         ev.preventDefault();
-        const field = rows[pickerIndex];
-        if (!field) return;
+        const entry = rows[pickerIndex];
+        if (!entry) return;
+        if (entry.kind === 'folder') { toggleFolder(entry.id); return; }
         closeFieldPicker();
-        openField(field.id);
+        openField(entry.id);
       } else if (ev.key === 'Escape') {
         ev.preventDefault();
         /* Or the document handler sees a closed picker and goes on to clear
@@ -476,6 +641,12 @@
     document.getElementById('fieldPickerNew').addEventListener('click', () => {
       closeFieldPicker();
       startNewField();
+    });
+
+    /* Naming a folder happens in the list, so the picker stays open for it. */
+    document.getElementById('fieldPickerNewFolder').addEventListener('click', ev => {
+      ev.stopPropagation();
+      startNewFolder();
     });
 
     panel.addEventListener('click', ev => ev.stopPropagation());
