@@ -259,24 +259,35 @@
       return btn;
     };
 
-    /* A folder in the strip is a chip, not a tab: it opens nothing, it only
-       shows or hides what is filed on it. It says how many it is holding when
-       it is closed, because that is the moment the count is not obvious. */
+    /* A folder in the strip is a chip, not a tab: it opens nothing itself, it
+       drops its fields below it to be chosen from — the same gesture the
+       fields button uses, for the same reason. It carries the underline when
+       the field you are on is filed on it, so you can still see where you are
+       without its fields being on screen. */
     const folderTab = (folder, fields) => {
-      const open = folderOpen(folder.id);
+      const holdsActive = currentView === 'tree' && !!activeField
+        && fields.some(f => f.id === activeField);
+      const here = holdsActive && Store.byId(activeField);
+
       const btn = document.createElement('button');
-      btn.className = 'tab tab-folder' + (open ? ' is-expanded' : '');
+      btn.className = 'tab tab-folder' + (holdsActive ? ' is-active' : '');
       btn.dataset.folder = folder.id;
-      btn.setAttribute('aria-expanded', String(open));
+      btn.setAttribute('aria-haspopup', 'true');
+      btn.setAttribute('aria-expanded', String(openFolderMenu === folder.id));
       btn.innerHTML =
-        `<span class="tab-caret">${open ? '&#9662;' : '&#9656;'}</span>` +
+        `<span class="tab-folder-icon">&#128193;</span>` +
         `<span>${escapeHtml(folder.name)}</span>` +
-        (open || !fields.length ? ''
-          : `<span class="tab-pct">${fields.length}</span>`);
-      btn.title = open
-        ? `Fold ${folder.name} away`
-        : `${folder.name} — ${fields.length === 1 ? '1 field' : fields.length + ' fields'} folded away`;
-      btn.addEventListener('click', () => toggleFolder(folder.id));
+        `<span class="tab-pct">${fields.length}</span>` +
+        `<span class="tab-caret">&#8964;</span>`;
+      btn.title = here
+        ? `${folder.name} — ${fields.length === 1 ? '1 field' : fields.length + ' fields'}, showing ${here.name}`
+        : `${folder.name} — ${fields.length === 1 ? '1 field' : fields.length + ' fields'}`;
+
+      btn.addEventListener('click', ev => {
+        ev.stopPropagation();
+        if (openFolderMenu === folder.id) closeFolderMenu();
+        else openFolderMenuFor(folder, btn);
+      });
       return btn;
     };
 
@@ -291,21 +302,12 @@
     add.addEventListener('click', startNewField);
     lead.appendChild(add);
 
-    /* The strip is grouped the same way the picker is: each folder announces
-       itself, its fields follow, and the loose ones come last. Collapsing a
-       folder here folds its fields away into the chip, which is the cheapest
-       way to get horizontal room back when there are a lot of them. */
+    /* A folder is one chip however much is filed on it, and its fields drop
+       below it when it is opened rather than unrolling along the strip. That
+       is what makes folders worth having here: twenty fields in four folders
+       take four slots, not twenty. Loose fields are still tabs of their own. */
     const groups = Store.fieldGroups();
-
-    groups.folders.forEach(({ folder, fields }) => {
-      strip.appendChild(folderTab(folder, fields));
-      if (!folderOpen(folder.id)) return;
-      fields.forEach(field => {
-        const el = tab(field.name, { fieldId: field.id });
-        el.classList.add('tab-shelved');
-        strip.appendChild(el);
-      });
-    });
+    groups.folders.forEach(({ folder, fields }) => strip.appendChild(folderTab(folder, fields)));
     groups.loose.forEach(field => strip.appendChild(tab(field.name, { fieldId: field.id })));
 
     const fields = Store.roots();
@@ -342,6 +344,128 @@
     frame.classList.toggle('has-more-right', strip.scrollLeft < max - 2);
   }
 
+  /* ---------------- a folder's own drop-down ---------------- */
+
+  /* The strip scrolls sideways and clips what it holds, so the panel cannot
+     live inside it. One shared panel is positioned under whichever chip was
+     clicked instead, which also means only one can ever be open. */
+  let openFolderMenu = null;
+  let folderMenuIndex = 0;
+
+  function closeFolderMenu() {
+    const menu = document.getElementById('folderMenu');
+    if (!menu || menu.hidden) return;
+    menu.hidden = true;
+    openFolderMenu = null;
+    document.querySelectorAll('.tab-folder[aria-expanded="true"]')
+      .forEach(chip => chip.setAttribute('aria-expanded', 'false'));
+  }
+
+  function openFolderMenuFor(folder, chip) {
+    const menu = document.getElementById('folderMenu');
+    closeFieldPicker();
+    hideDataMenu();
+
+    openFolderMenu = folder.id;
+    const fields = Store.fieldGroups().folders
+      .find(g => g.folder.id === folder.id);
+    folderMenuIndex = Math.max(0, (fields ? fields.fields : [])
+      .findIndex(f => f.id === activeField));
+
+    renderFolderMenu();
+    menu.hidden = false;
+    chip.setAttribute('aria-expanded', 'true');
+
+    /* Fixed to the viewport, under the chip and aligned to its left edge,
+       pulled back in if that would run it off the right of the window. */
+    const box = chip.getBoundingClientRect();
+    const width = Math.min(300, Math.max(200, window.innerWidth - 24));
+    const left = Math.max(8, Math.min(box.left, window.innerWidth - width - 8));
+    menu.style.top = Math.round(box.bottom + 4) + 'px';
+    menu.style.left = Math.round(left) + 'px';
+    menu.style.width = width + 'px';
+  }
+
+  function renderFolderMenu() {
+    const menu = document.getElementById('folderMenu');
+    const group = Store.fieldGroups().folders.find(g => g.folder.id === openFolderMenu);
+    if (!group) { closeFolderMenu(); return; }
+
+    menu.replaceChildren();
+    menu.setAttribute('aria-label', group.folder.name);
+
+    if (!group.fields.length) {
+      const empty = document.createElement('p');
+      empty.className = 'muted picker-empty';
+      empty.textContent = 'Nothing filed here yet. A field is filed from its Details panel.';
+      menu.appendChild(empty);
+      return;
+    }
+
+    folderMenuIndex = Math.max(0, Math.min(folderMenuIndex, group.fields.length - 1));
+
+    group.fields.forEach((field, i) => {
+      const row = document.createElement('button');
+      row.className = 'picker-row';
+      row.dataset.field = field.id;
+      if (i === folderMenuIndex) row.classList.add('is-cursor');
+
+      const open = currentView === 'tree' && field.id === activeField;
+      row.classList.toggle('is-open', open);
+      row.innerHTML =
+        '<span class="dot" style="background:var(' + Store.STATUS_BY_ID[field.status].cssVar + ')"></span>' +
+        '<span class="picker-name">' + escapeHtml(field.name) + '</span>' +
+        '<span class="picker-meta">' + Store.descendantsOf(field.id).length + ' topics</span>' +
+        '<span class="picker-pct">' + Math.round(Store.progressOf(field.id) * 100) + '%</span>';
+
+      row.addEventListener('click', ev => {
+        ev.stopPropagation();
+        closeFolderMenu();
+        openField(field.id);
+      });
+      row.addEventListener('mousemove', () => {
+        if (folderMenuIndex === i) return;
+        folderMenuIndex = i;
+        [...menu.children].forEach((el, j) => el.classList.toggle('is-cursor', j === i));
+      });
+      menu.appendChild(row);
+    });
+  }
+
+  const folderMenuIsOpen = () => !document.getElementById('folderMenu').hidden;
+
+  function wireFolderMenu() {
+    const menu = document.getElementById('folderMenu');
+    menu.addEventListener('click', ev => ev.stopPropagation());
+    document.addEventListener('click', closeFolderMenu);
+    window.addEventListener('resize', closeFolderMenu);
+
+    /* The chip keeps focus, so the keys are read at the document while the
+       panel is up rather than from inside it. */
+    document.addEventListener('keydown', ev => {
+      if (!folderMenuIsOpen()) return;
+      const group = Store.fieldGroups().folders.find(g => g.folder.id === openFolderMenu);
+      const fields = group ? group.fields : [];
+
+      if (ev.key === 'Escape') {
+        ev.preventDefault(); ev.stopPropagation();
+        closeFolderMenu();
+      } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        if (!fields.length) return;
+        ev.preventDefault(); ev.stopPropagation();
+        folderMenuIndex = (folderMenuIndex + (ev.key === 'ArrowDown' ? 1 : fields.length - 1))
+          % fields.length;
+        renderFolderMenu();
+      } else if (ev.key === 'Enter') {
+        const field = fields[folderMenuIndex];
+        if (!field) return;
+        ev.preventDefault(); ev.stopPropagation();
+        closeFolderMenu();
+        openField(field.id);
+      }
+    }, true);
+  }
+
   /* ---------------- the field picker ---------------- */
 
   /* With a handful of fields the strip is enough. With thirty it is not, and
@@ -349,10 +473,11 @@
      picker answers that: every field in one list, filterable, keyboard-driven,
      and dropped below the bar so it never covers the views pinned beside it. */
   let pickerIndex = 0;
-  /* Folders the person has collapsed, rather than the ones they have opened:
-     stored this way round, a folder nobody has touched is open, so filing a
-     field never makes it disappear from the strip. The strip and the picker
-     share the set, so collapsing in one collapses in both. */
+  /* Folders the person has collapsed in the picker, rather than the ones they
+     have opened: stored this way round, a folder nobody has touched is open,
+     so filing a field never makes it disappear from the list. The strip does
+     not use this — there a folder is always one chip, and its fields are in
+     the panel it drops. */
   let shutFolders = new Set();
   const folderOpen = id => !shutFolders.has(id);
 
@@ -393,8 +518,7 @@
   function toggleFolder(id) {
     if (shutFolders.has(id)) shutFolders.delete(id); else shutFolders.add(id);
     persistUi();
-    renderTabs();
-    if (!document.getElementById('fieldPicker').hidden) renderPickerList();
+    renderPickerList();
   }
 
   function renderPickerList() {
@@ -557,13 +681,10 @@
   function openFieldPicker() {
     const panel  = document.getElementById('fieldPicker');
     const search = document.getElementById('fieldPickerSearch');
-    /* Both popovers close on a click anywhere, but the click that opens one
-       is stopped before it gets there — so the other is closed by hand. */
-    const dataMenu = document.getElementById('dataMenu');
-    if (dataMenu) {
-      dataMenu.hidden = true;
-      document.getElementById('dataMenuBtn').setAttribute('aria-expanded', 'false');
-    }
+    /* They all close on a click anywhere, but the click that opens one is
+       stopped before it gets there — so the others are closed by hand. */
+    hideDataMenu();
+    closeFolderMenu();
 
     panel.hidden = false;
     document.getElementById('fieldPickerBtn').setAttribute('aria-expanded', 'true');
@@ -794,6 +915,15 @@
     toast(message);
   }
 
+  /* Three things can hang under the bar and only one of them at a time, so
+     each of them can put the others away. */
+  function hideDataMenu() {
+    const menu = document.getElementById('dataMenu');
+    if (!menu || menu.hidden) return;
+    menu.hidden = true;
+    document.getElementById('dataMenuBtn').setAttribute('aria-expanded', 'false');
+  }
+
   function wireDataMenu() {
     const btn  = document.getElementById('dataMenuBtn');
     const menu = document.getElementById('dataMenu');
@@ -801,6 +931,7 @@
     btn.addEventListener('click', ev => {
       ev.stopPropagation();
       closeFieldPicker();
+      closeFolderMenu();
       menu.hidden = !menu.hidden;
       btn.setAttribute('aria-expanded', String(!menu.hidden));
     });
@@ -1252,6 +1383,7 @@
 
     wireDataMenu();
     wireFieldPicker();
+    wireFolderMenu();
     wireSearch();
     wireKeyboard();
     maybeShowSeedBanner();

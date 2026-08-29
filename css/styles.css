@@ -654,32 +654,36 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 }
 .tab-all .glyph { font-size: 13px; }
 
-/* A folder chip in the strip is not a tab: it opens nothing and must not look
-   like something you could be "on", so it carries no underline and sits in a
-   quiet pill of its own. */
-.tab-folder {
-  gap: 5px;
-  color: var(--text-dim);
-  border-bottom-color: transparent !important;
-  font-weight: 500;
-}
-.tab-folder:hover { color: var(--accent); }
-.tab-folder .tab-caret { font-size: 9px; color: var(--text-faint); }
+/* A folder chip is one slot however much is filed on it: it holds a name, a
+   count and a caret, and drops its fields below rather than along the strip.
+   It still takes the underline when the field you are on is inside it, which
+   is the only way to see where you are once its fields are off the bar. */
+.tab-folder { gap: 5px; color: var(--text-dim); font-weight: 500; }
+.tab-folder:hover,
+.tab-folder[aria-expanded="true"] { color: var(--accent); }
+.tab-folder-icon { font-size: 11px; filter: grayscale(.35); }
+.tab-folder .tab-caret { font-size: 10px; color: var(--text-faint); }
 .tab-folder:hover .tab-caret,
-.tab-folder.is-expanded .tab-caret { color: inherit; }
-.tab-folder::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 9px; bottom: 9px;
-  border-left: 1px solid var(--border);
-}
-.tab-folder:first-child::before { border-left: 0; }
+.tab-folder[aria-expanded="true"] .tab-caret { color: inherit; }
+.tab-folder.is-active { color: var(--text); }
 
-/* Fields on a folder are tucked in slightly, so a glance shows what belongs
-   to the chip before them. */
-.tab-shelved { padding-left: 8px; }
-.tab-shelved .dot { opacity: .85; }
+/* The panel is fixed to the viewport because the strip that opens it scrolls
+   sideways and clips anything inside it. */
+.folder-menu {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
 
 .tab-add { color: var(--text-faint); font-size: 16px; padding: 9px 11px 8px; }
 .tab-add:hover { color: var(--accent); }

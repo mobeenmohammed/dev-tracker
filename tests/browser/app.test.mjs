@@ -68,7 +68,8 @@ const clickNode = name => {
   if (!n) throw new Error('no node named ' + name);
   click(n.querySelector('.card') || n);
 };
-const fieldTabs = () => $$('#fieldTabs .tab');
+// a folder chip is not a field tab, so it never answers to a field's name
+const fieldTabs = () => $$('#fieldTabs .tab:not(.tab-folder)');
 const tabNamed  = name => fieldTabs().find(t => t.textContent.includes(name));
 
 /* ---------- 1. tab bar ---------- */
@@ -1162,12 +1163,14 @@ check('the fields really did grow', Store.roots().length === manyBefore + 16,
 
 const scroller = $('#fieldTabsScroll');
 
-/* Only the fields and their folder chips scroll; everything else is pinned. */
-check('only the fields and their folders sit in the scrolling strip',
+/* Only loose fields and folder chips scroll; everything else is pinned. A
+   folder is one slot however much is filed on it. */
+check('only the loose fields and the folder chips sit in the scrolling strip',
       scroller.querySelectorAll('.tab').length ===
-        Store.roots().length + Store.folders().length,
+        Store.roots().filter(r => !r.folderId).length + Store.folders().length,
       `${scroller.querySelectorAll('.tab').length} in the strip vs ` +
-      `${Store.roots().length} fields and ${Store.folders().length} folders`);
+      `${Store.roots().filter(r => !r.folderId).length} loose fields and ` +
+      `${Store.folders().length} folders`);
 check('All is pinned outside it',      !scroller.contains(tabNamed('All')));
 check('the new-field button too',      !scroller.contains($('#addFieldTab')));
 check('and the picker',                !scroller.contains($('#fieldPickerBtn')));
@@ -1405,18 +1408,13 @@ check('folding it hides its fields', pickerRow('.picker-row.is-shelved').length 
       `${pickerRow('.picker-row.is-shelved').length} still shown`);
 check('but the folder itself stays', rowNames().includes('Number Shelf'), rowNames().join(' | '));
 
-/* the strip is folded by the same gesture, because it is the same state */
-check('the strip folded with it',
-      !$$('#fieldTabsScroll .tab').some(t => t.dataset.field === 'hpc'),
+check('but the strip is unaffected: a folder is one chip there either way',
+      $$('#fieldTabsScroll .tab').filter(t => t.dataset.folder === shelf.id).length === 1,
       $$('#fieldTabsScroll .tab').map(t => t.dataset.field || t.dataset.folder).join(','));
-check('and its chip says what it is holding',
-      /2/.test($('#fieldTabsScroll .tab-folder').textContent),
-      $('#fieldTabsScroll .tab-folder').textContent);
 
 click($('#fieldPickerList .picker-folder'));
-check('unfolding brings them back everywhere',
-      pickerRow('.picker-row.is-shelved').length === 2 &&
-      $$('#fieldTabsScroll .tab').some(t => t.dataset.field === 'hpc'),
+check('unfolding brings them back in the picker',
+      pickerRow('.picker-row.is-shelved').length === 2,
       `${pickerRow('.picker-row.is-shelved').length} in the picker`);
 
 /* and they open like any other field */
@@ -1503,24 +1501,56 @@ check('the folder has a chip in the strip', chipAt >= 0,
       stripEls.map(t => t.dataset.folder || t.dataset.field).join(','));
 check('the chip is named', /Filing/.test(stripEls[chipAt].textContent),
       stripEls[chipAt].textContent);
-check('its fields follow it immediately',
-      stripEls.slice(chipAt + 1, chipAt + 1 + filed.length).map(t => t.dataset.field).sort().join()
-        === filed.slice().sort().join(),
-      stripEls.slice(chipAt + 1, chipAt + 3).map(t => t.dataset.field).join(','));
-check('and they are drawn as filed',
-      stripEls[chipAt + 1].classList.contains('tab-shelved'));
-check('a chip is not something you can be on',
-      !stripEls[chipAt].classList.contains('is-active'));
-
-/* Clicking the chip folds the group away right there in the strip. */
-click(stripEls[chipAt]);
-check('clicking the chip folds its fields away',
+check('a filed field is not a tab of its own',
       !$$('#fieldTabsScroll .tab').some(t => filed.includes(t.dataset.field)),
       $$('#fieldTabsScroll .tab').map(t => t.dataset.field).join(','));
-check('and the chip stays to bring them back',
-      !!$(`#fieldTabsScroll .tab[data-folder="${filing.id}"]`));
+check('the chip says how many it holds',
+      $(`#fieldTabsScroll .tab[data-folder="${filing.id}"] .tab-pct`).textContent
+        === String(filed.length),
+      $(`#fieldTabsScroll .tab[data-folder="${filing.id}"] .tab-pct`).textContent);
+
+/* Clicking the chip drops its fields below it, the way the fields button
+   drops every field below itself. */
+check('the panel starts closed', $('#folderMenu').hidden);
 click($(`#fieldTabsScroll .tab[data-folder="${filing.id}"]`));
-check('which it does', $$('#fieldTabsScroll .tab').some(t => filed.includes(t.dataset.field)));
+check('clicking the chip opens a panel below it', !$('#folderMenu').hidden);
+check('it lists exactly what is filed there',
+      $$('#folderMenu .picker-row').map(r => r.dataset.field).sort().join() === filed.slice().sort().join(),
+      $$('#folderMenu .picker-row').map(r => r.dataset.field).join(','));
+check('the panel is outside the strip, which would clip it',
+      !$('#fieldTabsScroll').contains($('#folderMenu')));
+check('and outside the bar, so it covers nothing pinned there',
+      !$('.tabbar').contains($('#folderMenu')));
+
+/* And a field is chosen from it, which is the whole point. */
+click($$('#folderMenu .picker-row').find(r => r.dataset.field === 'cpp'));
+check('choosing a field from the panel opens it', Tree.rootId === 'cpp', String(Tree.rootId));
+check('and the panel closes behind it', $('#folderMenu').hidden);
+check('the chip carries the underline for the field inside it',
+      $(`#fieldTabsScroll .tab[data-folder="${filing.id}"]`).classList.contains('is-active'));
+
+/* It behaves like the other panels: keyboard, and a click anywhere closes. */
+click($(`#fieldTabsScroll .tab[data-folder="${filing.id}"]`));
+check('it reopens', !$('#folderMenu').hidden);
+key(doc.body, 'ArrowDown');
+check('arrow keys move a cursor through it',
+      $$('#folderMenu .picker-row.is-cursor').length === 1);
+key(doc.body, 'Escape');
+check('Escape closes it', $('#folderMenu').hidden);
+
+click($(`#fieldTabsScroll .tab[data-folder="${filing.id}"]`));
+click(doc.body);
+check('and so does a click anywhere else', $('#folderMenu').hidden);
+
+/* Opening one panel puts the others away. */
+click($(`#fieldTabsScroll .tab[data-folder="${filing.id}"]`));
+click($('#fieldPickerBtn'));
+check('opening the fields picker closes a folder panel', $('#folderMenu').hidden);
+check('and the picker is the one showing', !$('#fieldPicker').hidden);
+click($(`#fieldTabsScroll .tab[data-folder="${filing.id}"]`));
+check('and the other way round', $('#fieldPicker').hidden && !$('#folderMenu').hidden,
+      `picker hidden=${$('#fieldPicker').hidden} menu hidden=${$('#folderMenu').hidden}`);
+click(doc.body);
 
 Store.deleteFolder(filing.id);
 click(tabNamed('All'));
