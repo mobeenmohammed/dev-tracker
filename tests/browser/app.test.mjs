@@ -1162,9 +1162,12 @@ check('the fields really did grow', Store.roots().length === manyBefore + 16,
 
 const scroller = $('#fieldTabsScroll');
 
-check('only the field tabs sit in the scrolling strip',
-      scroller.querySelectorAll('.tab').length === Store.roots().length,
-      `${scroller.querySelectorAll('.tab').length} in the strip vs ${Store.roots().length} fields`);
+/* Only the fields and their folder chips scroll; everything else is pinned. */
+check('only the fields and their folders sit in the scrolling strip',
+      scroller.querySelectorAll('.tab').length ===
+        Store.roots().length + Store.folders().length,
+      `${scroller.querySelectorAll('.tab').length} in the strip vs ` +
+      `${Store.roots().length} fields and ${Store.folders().length} folders`);
 check('All is pinned outside it',      !scroller.contains(tabNamed('All')));
 check('the new-field button too',      !scroller.contains($('#addFieldTab')));
 check('and the picker',                !scroller.contains($('#fieldPickerBtn')));
@@ -1385,32 +1388,43 @@ check('and it is a folder, not a field',
 check('it says how many are on it',
       /2 fields/.test($('#fieldPickerList .picker-folder .picker-meta').textContent),
       $('#fieldPickerList .picker-folder .picker-meta').textContent);
-check('a shelved field is not shown while it is closed',
-      !rowNames().includes('High Performance Computing'), rowNames().join(' | '));
-check('the loose fields still are', rowNames().includes('C++'), rowNames().join(' | '));
-
-/* opening it reveals what is on it */
-const folderRow = $('#fieldPickerList .picker-folder');
-click(folderRow);
-check('opening it shows the fields on it',
-      rowNames().includes('High Performance Computing') && rowNames().includes('Number Shelf'), rowNames().join(' | '));
+/* A folder nobody has touched is open, so filing a field never makes it
+   vanish from anywhere. */
+check('its fields are shown from the start',
+      rowNames().includes('High Performance Computing'), rowNames().join(' | '));
 check('they are drawn as belonging to it',
       pickerRow('.picker-row.is-shelved').length === 2,
       `${pickerRow('.picker-row.is-shelved').length}`);
 check('and the caret says it is open',
       $('#fieldPickerList .picker-folder').classList.contains('is-expanded'));
+check('the loose fields are there too', rowNames().includes('C++'), rowNames().join(' | '));
+
+/* folding it away hides them */
+click($('#fieldPickerList .picker-folder'));
+check('folding it hides its fields', pickerRow('.picker-row.is-shelved').length === 0,
+      `${pickerRow('.picker-row.is-shelved').length} still shown`);
+check('but the folder itself stays', rowNames().includes('Number Shelf'), rowNames().join(' | '));
+
+/* the strip is folded by the same gesture, because it is the same state */
+check('the strip folded with it',
+      !$$('#fieldTabsScroll .tab').some(t => t.dataset.field === 'hpc'),
+      $$('#fieldTabsScroll .tab').map(t => t.dataset.field || t.dataset.folder).join(','));
+check('and its chip says what it is holding',
+      /2/.test($('#fieldTabsScroll .tab-folder').textContent),
+      $('#fieldTabsScroll .tab-folder').textContent);
+
+click($('#fieldPickerList .picker-folder'));
+check('unfolding brings them back everywhere',
+      pickerRow('.picker-row.is-shelved').length === 2 &&
+      $$('#fieldTabsScroll .tab').some(t => t.dataset.field === 'hpc'),
+      `${pickerRow('.picker-row.is-shelved').length} in the picker`);
 
 /* and they open like any other field */
 const shelved = pickerRow('.picker-row.is-shelved').find(r => r.dataset.field === 'hpc');
 click(shelved);
 check('a field opens from inside a folder', Tree.rootId === 'hpc', String(Tree.rootId));
 check('the picker closed behind it', $('#fieldPicker').hidden);
-
-/* closing hides them again */
 click($('#fieldPickerBtn'));
-click($('#fieldPickerList .picker-folder'));
-check('closing hides them again', pickerRow('.picker-row.is-shelved').length === 0,
-      `${pickerRow('.picker-row.is-shelved').length} still shown`);
 
 /* searching must not let a closed folder hide the only match */
 const box = $('#fieldPickerSearch');
@@ -1479,15 +1493,41 @@ check('without moving it in the tree', Store.byId('cpp').parentId === null,
 window.Views.renderInspector('cpp-move');
 check('a sub-topic is not offered a folder', !$('#f-folder'));
 
-/* The strip reads folder by folder, so a folder's fields sit together. */
+/* The strip announces each folder and puts its fields straight after it. */
 click(tabNamed('All'));
-const stripOrder = $$('#fieldTabsScroll .tab').map(t => t.dataset.field);
+const stripEls = $$('#fieldTabsScroll .tab');
+const chipAt = stripEls.findIndex(t => t.dataset.folder === filing.id);
 const filed = Store.roots().filter(r => r.folderId === filing.id).map(r => r.id);
-check('the strip puts a folder\u2019s fields first',
-      stripOrder.slice(0, filed.length).sort().join() === filed.sort().join(),
-      stripOrder.slice(0, 3).join(','));
+
+check('the folder has a chip in the strip', chipAt >= 0,
+      stripEls.map(t => t.dataset.folder || t.dataset.field).join(','));
+check('the chip is named', /Filing/.test(stripEls[chipAt].textContent),
+      stripEls[chipAt].textContent);
+check('its fields follow it immediately',
+      stripEls.slice(chipAt + 1, chipAt + 1 + filed.length).map(t => t.dataset.field).sort().join()
+        === filed.slice().sort().join(),
+      stripEls.slice(chipAt + 1, chipAt + 3).map(t => t.dataset.field).join(','));
+check('and they are drawn as filed',
+      stripEls[chipAt + 1].classList.contains('tab-shelved'));
+check('a chip is not something you can be on',
+      !stripEls[chipAt].classList.contains('is-active'));
+
+/* Clicking the chip folds the group away right there in the strip. */
+click(stripEls[chipAt]);
+check('clicking the chip folds its fields away',
+      !$$('#fieldTabsScroll .tab').some(t => filed.includes(t.dataset.field)),
+      $$('#fieldTabsScroll .tab').map(t => t.dataset.field).join(','));
+check('and the chip stays to bring them back',
+      !!$(`#fieldTabsScroll .tab[data-folder="${filing.id}"]`));
+click($(`#fieldTabsScroll .tab[data-folder="${filing.id}"]`));
+check('which it does', $$('#fieldTabsScroll .tab').some(t => filed.includes(t.dataset.field)));
+
 Store.deleteFolder(filing.id);
 click(tabNamed('All'));
+check('removing the folder takes its chip with it',
+      !$(`#fieldTabsScroll .tab[data-folder="${filing.id}"]`));
+check('but not its fields',
+      $$('#fieldTabsScroll .tab').some(t => t.dataset.field === 'cpp'));
 
 if (errors.length) {
   console.log('--- runtime errors ---');

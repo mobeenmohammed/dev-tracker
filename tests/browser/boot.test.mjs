@@ -64,6 +64,7 @@ const check = (label, cond, detail = '') => {
   check('and the picker knows the count',
         doc.getElementById('fieldPickerCount').textContent === '4 fields',
         doc.getElementById('fieldPickerCount').textContent);
+  check('the seed has no folders, so no chips', !doc.querySelector('.tab-folder'));
 }
 
 /* --- 2. a field deleted since the last visit falls back to the combined tree --- */

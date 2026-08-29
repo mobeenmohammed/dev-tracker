@@ -29,7 +29,7 @@
         showActivity: Tree.showActivity,
         showRefs: Tree.showRefs,
         inspectorWidth,
-        openFolders: [...openFolders],
+        shutFolders: [...shutFolders],
       }));
     } catch { /* private mode */ }
   }
@@ -48,7 +48,7 @@
     showActivity = saved.showActivity !== false;
     showRefs = saved.showRefs !== false;
     if (Number.isFinite(saved.inspectorWidth)) inspectorWidth = saved.inspectorWidth;
-    if (Array.isArray(saved.openFolders)) openFolders = new Set(saved.openFolders.map(String));
+    if (Array.isArray(saved.shutFolders)) shutFolders = new Set(saved.shutFolders.map(String));
   }
 
   /* ---------------- resizable inspector ---------------- */
@@ -259,6 +259,27 @@
       return btn;
     };
 
+    /* A folder in the strip is a chip, not a tab: it opens nothing, it only
+       shows or hides what is filed on it. It says how many it is holding when
+       it is closed, because that is the moment the count is not obvious. */
+    const folderTab = (folder, fields) => {
+      const open = folderOpen(folder.id);
+      const btn = document.createElement('button');
+      btn.className = 'tab tab-folder' + (open ? ' is-expanded' : '');
+      btn.dataset.folder = folder.id;
+      btn.setAttribute('aria-expanded', String(open));
+      btn.innerHTML =
+        `<span class="tab-caret">${open ? '&#9662;' : '&#9656;'}</span>` +
+        `<span>${escapeHtml(folder.name)}</span>` +
+        (open || !fields.length ? ''
+          : `<span class="tab-pct">${fields.length}</span>`);
+      btn.title = open
+        ? `Fold ${folder.name} away`
+        : `${folder.name} — ${fields.length === 1 ? '1 field' : fields.length + ' fields'} folded away`;
+      btn.addEventListener('click', () => toggleFolder(folder.id));
+      return btn;
+    };
+
     lead.appendChild(tab('All', { isAll: true }));
 
     const add = document.createElement('button');
@@ -270,17 +291,24 @@
     add.addEventListener('click', startNewField);
     lead.appendChild(add);
 
-    /* Filed fields first, folder by folder, then the loose ones — so the strip
-       reads in the same order as the picker and a folder's fields are next to
-       each other rather than scattered along it. */
+    /* The strip is grouped the same way the picker is: each folder announces
+       itself, its fields follow, and the loose ones come last. Collapsing a
+       folder here folds its fields away into the chip, which is the cheapest
+       way to get horizontal room back when there are a lot of them. */
     const groups = Store.fieldGroups();
-    const fields = [...groups.folders.flatMap(g => g.fields), ...groups.loose];
-    fields.forEach(field => {
-      const el = tab(field.name, { fieldId: field.id });
-      const folder = field.folderId && Store.folders().find(d => d.id === field.folderId);
-      if (folder) el.title = folder.name + ' \u00b7 ' + el.title;
-      strip.appendChild(el);
+
+    groups.folders.forEach(({ folder, fields }) => {
+      strip.appendChild(folderTab(folder, fields));
+      if (!folderOpen(folder.id)) return;
+      fields.forEach(field => {
+        const el = tab(field.name, { fieldId: field.id });
+        el.classList.add('tab-shelved');
+        strip.appendChild(el);
+      });
     });
+    groups.loose.forEach(field => strip.appendChild(tab(field.name, { fieldId: field.id })));
+
+    const fields = Store.roots();
 
     const count = document.getElementById('fieldPickerCount');
     if (count) count.textContent = fields.length === 1 ? '1 field' : fields.length + ' fields';
@@ -321,7 +349,12 @@
      picker answers that: every field in one list, filterable, keyboard-driven,
      and dropped below the bar so it never covers the views pinned beside it. */
   let pickerIndex = 0;
-  let openFolders = new Set();      // folders expanded in the picker
+  /* Folders the person has collapsed, rather than the ones they have opened:
+     stored this way round, a folder nobody has touched is open, so filing a
+     field never makes it disappear from the strip. The strip and the picker
+     share the set, so collapsing in one collapses in both. */
+  let shutFolders = new Set();
+  const folderOpen = id => !shutFolders.has(id);
 
   /* One flat list of what is actually on screen: All, then each folder header
      followed by its fields when it is open, then the fields on no folder.
@@ -345,7 +378,7 @@
       const shown = named ? fields : matches;
       if (q && !named && !matches.length) return;
 
-      const open = q ? true : openFolders.has(folder.id);
+      const open = q ? true : folderOpen(folder.id);
       rows.push({ kind: 'folder', id: folder.id, name: folder.name,
                   count: fields.length, open });
       if (open) shown.forEach(f => rows.push({ kind: 'field', id: f.id, name: f.name,
@@ -358,9 +391,10 @@
   }
 
   function toggleFolder(id) {
-    if (openFolders.has(id)) openFolders.delete(id); else openFolders.add(id);
+    if (shutFolders.has(id)) shutFolders.delete(id); else shutFolders.add(id);
     persistUi();
-    renderPickerList();
+    renderTabs();
+    if (!document.getElementById('fieldPicker').hidden) renderPickerList();
   }
 
   function renderPickerList() {
@@ -410,7 +444,7 @@
         row.querySelector('.picker-del').addEventListener('click', ev => {
           ev.stopPropagation();
           const freed = Store.deleteFolder(entry.id);
-          openFolders.delete(entry.id);
+          shutFolders.delete(entry.id);
           persistUi();
           renderPickerList();
           renderTabs();
@@ -504,8 +538,9 @@
       const name = input.value.trim();
       if (commit && name) {
         const folder = Store.addFolder(name);
-        openFolders.add(folder.id);
+        shutFolders.delete(folder.id);
         persistUi();
+        renderTabs();
         toast(`Made "${folder.name}" — put a field on it from its Details panel.`);
       }
       renderPickerList();
@@ -536,7 +571,7 @@
     /* The folder holding the open field is opened, or it would not be there
        to start on. */
     const current = activeField && Store.byId(activeField);
-    if (current && current.folderId) openFolders.add(current.folderId);
+    if (current && current.folderId) shutFolders.delete(current.folderId);
 
     /* Start on the field already open, so Enter on its own changes nothing. */
     pickerIndex = Math.max(0, pickerRows()

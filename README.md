@@ -66,17 +66,24 @@ tab are all exactly as they were.
   the list, and the picker stays open so you can carry on.
 - **File a field** on it from that field's **Details** panel, where everything
   else about where a topic sits is edited.
-- **Open and close** a folder by clicking it, or with → and ← from the
-  keyboard; Enter on a folder opens it rather than jumping anywhere. Which
-  folders are open is remembered between visits, and the folder holding the
-  field you are on always opens.
+- **Open and close** a folder by clicking it — in the picker, or on its chip in
+  the tab strip — or with → and ← from the keyboard; Enter on a folder opens it
+  rather than jumping anywhere. The two views share one notion of "folded
+  away", so collapsing in either collapses in both. A folder nobody has touched
+  is open, so filing a field never makes it disappear; what you have folded
+  away is remembered between visits, and the folder holding the field you are
+  on always opens.
 - **Searching opens folders**, because a closed one hiding the only match would
   look like no match at all.
 - **Rename** by double-clicking a folder; **remove** it with the × on its row.
   Removing a folder never removes a field — they come back to the top level.
 
-The tab strip reads in the same order, folder by folder, so a folder's fields
-sit next to each other rather than scattered along it.
+The tab strip is grouped the same way: each folder announces itself with a chip
+carrying a disclosure caret, and its fields follow it, tucked in slightly.
+Clicking the chip folds them away into it — which is the cheapest way to get
+horizontal room back when there are a lot of fields — and the chip then says
+how many it is holding. A chip opens nothing and can never be the active tab;
+it only shows and hides.
 
 A folder holding nothing but private fields is a label for private work, so its
 name stays out of the public snapshot. One with any public field on it, or one

@@ -76,8 +76,11 @@ const probeRow = cls => {
   doc.querySelector('#fieldPickerList').appendChild(el);
   return window.getComputedStyle(el);
 };
+/* Set apart by weight, colour and a caret — not by shouting the name. */
 check('a folder row is set apart from a field row',
-      /\.picker-folder\s+\.picker-name\s*\{[^}]*text-transform:\s*uppercase/.test(css));
+      /\.picker-folder\s+\.picker-name\s*\{[^}]*font-weight/.test(css));
+check('and folder names are left as they were typed',
+      !/text-transform:\s*uppercase/.test(css), 'something still uppercases a name');
 check('and the fields on it are indented under it',
       /\.picker-row\.is-shelved\s*\{[^}]*padding-left/.test(css));
 check('the indent rail can be positioned against the row',

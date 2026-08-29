@@ -654,6 +654,33 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 }
 .tab-all .glyph { font-size: 13px; }
 
+/* A folder chip in the strip is not a tab: it opens nothing and must not look
+   like something you could be "on", so it carries no underline and sits in a
+   quiet pill of its own. */
+.tab-folder {
+  gap: 5px;
+  color: var(--text-dim);
+  border-bottom-color: transparent !important;
+  font-weight: 500;
+}
+.tab-folder:hover { color: var(--accent); }
+.tab-folder .tab-caret { font-size: 9px; color: var(--text-faint); }
+.tab-folder:hover .tab-caret,
+.tab-folder.is-expanded .tab-caret { color: inherit; }
+.tab-folder::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 9px; bottom: 9px;
+  border-left: 1px solid var(--border);
+}
+.tab-folder:first-child::before { border-left: 0; }
+
+/* Fields on a folder are tucked in slightly, so a glance shows what belongs
+   to the chip before them. */
+.tab-shelved { padding-left: 8px; }
+.tab-shelved .dot { opacity: .85; }
+
 .tab-add { color: var(--text-faint); font-size: 16px; padding: 9px 11px 8px; }
 .tab-add:hover { color: var(--accent); }
 
@@ -762,9 +789,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
    underneath so the nesting is visible at a glance. */
 .picker-folder .picker-name {
   color: var(--text-dim);
-  font-size: 12px;
-  letter-spacing: .03em;
-  text-transform: uppercase;
+  font-weight: 500;
 }
 .picker-folder.is-cursor .picker-name,
 .picker-folder:hover .picker-name { color: var(--text); }
