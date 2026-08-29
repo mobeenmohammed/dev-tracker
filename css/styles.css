@@ -816,6 +816,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 }
 .picker-row { position: relative; }
 
+.picker-edit,
 .picker-del {
   flex: none;
   width: 16px;
@@ -826,8 +827,12 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   opacity: 0;
   transition: opacity .12s, color .12s;
 }
+.picker-folder:hover .picker-edit,
+.picker-folder.is-cursor .picker-edit,
 .picker-folder:hover .picker-del,
 .picker-folder.is-cursor .picker-del { opacity: 1; }
+.picker-edit { font-size: 10px; }
+.picker-edit:hover { color: var(--accent); background: var(--bg-elev-2); }
 .picker-del:hover { color: var(--danger); background: var(--bg-elev-2); }
 
 .picker-rename {

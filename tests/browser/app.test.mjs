@@ -1559,6 +1559,114 @@ check('removing the folder takes its chip with it',
 check('but not its fields',
       $$('#fieldTabsScroll .tab').some(t => t.dataset.field === 'cpp'));
 
+/* A panel fixed to the viewport cannot follow its chip, so scrolling the strip
+   must put it away rather than leave it hanging over nothing. */
+const anchored = Store.addFolder('Anchored');
+Store.setNodeFolder('cpp', anchored.id);
+click(tabNamed('All'));
+click($(`#fieldTabsScroll .tab[data-folder="${anchored.id}"]`));
+check('the panel is up', !$('#folderMenu').hidden);
+fire($('#fieldTabsScroll'), 'scroll');
+check('scrolling the strip closes it', $('#folderMenu').hidden);
+
+/* The extension delivering a solve rebuilds the bar with no click involved,
+   which is the one way the strip can change underneath an open panel. */
+click($(`#fieldTabsScroll .tab[data-folder="${anchored.id}"]`));
+const staleChip = $(`#fieldTabsScroll .tab[data-folder="${anchored.id}"]`);
+await offerSolves([
+  { source: 'codeforces', problemId: 'FOLDER1', title: 'Arrived while open',
+    tags: [], solvedAt: Store.todayISO() },
+]);
+const freshChip = $(`#fieldTabsScroll .tab[data-folder="${anchored.id}"]`);
+check('the strip really was rebuilt', !doc.contains(staleChip));
+check('the fresh chip still says it is open',
+      freshChip && freshChip.getAttribute('aria-expanded') === 'true',
+      freshChip && freshChip.getAttribute('aria-expanded'));
+check('and it is still showing', !$('#folderMenu').hidden);
+
+/* If the folder itself goes, the panel goes with it. */
+Store.deleteFolder(anchored.id);
+await offerSolves([
+  { source: 'codeforces', problemId: 'FOLDER2', title: 'And another',
+    tags: [], solvedAt: Store.todayISO() },
+]);
+check('a panel for a folder that no longer exists is put away', $('#folderMenu').hidden);
+
+/* Folding a folder while a search is on would change nothing you can see and
+   then surprise you once the box was cleared. */
+click($('#fieldPickerBtn'));
+const searchable = Store.folders()[0];
+const openBefore = $$('#fieldPickerList .picker-row.is-shelved').length;
+const pbox = $('#fieldPickerSearch');
+pbox.value = 'Field';
+fire(pbox, 'input');
+const headerWhileSearching = $('#fieldPickerList .picker-folder');
+if (headerWhileSearching) click(headerWhileSearching);
+pbox.value = '';
+fire(pbox, 'input');
+check('folding while searching is not done behind your back',
+      $$('#fieldPickerList .picker-row.is-shelved').length === openBefore,
+      `${$$('#fieldPickerList .picker-row.is-shelved').length} vs ${openBefore}`);
+click(doc.body);
+
+/* ---------- 17. what the second review turned up ---------- */
+
+const named = Store.addFolder('Needs A Name');
+Store.setNodeFolder('swe', named.id);
+click(tabNamed('All'));
+click($('#fieldPickerBtn'));
+const namedRow = () => $$('#fieldPickerList .picker-folder')
+  .find(r => r.dataset.folder === named.id);
+
+/* Renaming a folder was advertised on the row but unreachable: the first click
+   of the double-click toggled the folder and rebuilt the list, so the second
+   landed on an element that was no longer in the document. */
+check('a folder offers a rename control', !!namedRow().querySelector('.picker-edit'));
+click(namedRow().querySelector('.picker-edit'));
+check('it opens a rename box', !!$('#fieldPickerList .picker-rename'));
+const renameBox = $('#fieldPickerList .picker-rename');
+renameBox.value = 'Engineering';
+key(renameBox, 'Enter');
+check('and the new name sticks',
+      Store.folders().find(f => f.id === named.id).name === 'Engineering',
+      Store.folders().find(f => f.id === named.id).name);
+
+/* Double-click still works, because the handler is on the list rather than on
+   a row that the first click throws away. */
+click(namedRow());
+namedRow().dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+check('double-clicking a folder still opens the box too',
+      !!$('#fieldPickerList .picker-rename'));
+key($('#fieldPickerList .picker-rename'), 'Escape');
+click(doc.body);
+
+/* The folder panel took every keystroke while it was open, including ones
+   meant for something being typed into. */
+click($(`#fieldTabsScroll .tab[data-folder="${named.id}"]`));
+check('the panel is open', !$('#folderMenu').hidden);
+const searchEl = $('#search');
+searchEl.focus();
+searchEl.value = 'CUDA';
+const enterEv = new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+searchEl.dispatchEvent(enterEv);
+check('Enter in the search box is not swallowed by the panel', !enterEv.defaultPrevented);
+check('it did not open a field behind your back', Tree.rootId !== 'swe', String(Tree.rootId));
+check('and the panel got out of the way', $('#folderMenu').hidden);
+searchEl.value = '';
+Tree.setQuery('');
+
+/* Deleting a folder must not leave an open Details panel offering it. */
+window.Views.renderInspector('swe');
+check('the field can be filed', !!$('#f-folder'));
+check('and its folder is offered',
+      [...$('#f-folder').options].some(o => o.value === named.id));
+click($('#fieldPickerBtn'));
+click(namedRow().querySelector('.picker-del'));
+click(doc.body);
+check('deleting it takes it out of the open Details panel',
+      !$('#f-folder') || ![...$('#f-folder').options].some(o => o.value === named.id),
+      $('#f-folder') ? [...$('#f-folder').options].map(o => o.value).join(',') : 'no select');
+
 if (errors.length) {
   console.log('--- runtime errors ---');
   errors.forEach(e => console.log('  ' + e));

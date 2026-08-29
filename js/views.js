@@ -717,9 +717,20 @@ const Views = (() => {
           tags:     String(f.get('tags')).split(',').map(t => t.trim()).filter(Boolean),
         });
         /* Filing is separate from parentage: a folder is where a field is
-           found, not something it sits under, and only a field has one. */
-        if (form.querySelector('#f-folder') && !f.get('parentId')) {
-          Store.setNodeFolder(node.id, f.get('folderId') || null);
+           found, not something it sits under, and only a field has one. Given
+           a parent in the same save it stops being a field, and updateNode has
+           already taken its folder away. */
+        const wanted = f.get('folderId') || null;
+        if (form.querySelector('#f-folder') && !f.get('parentId') && wanted) {
+          if (!Store.setNodeFolder(node.id, wanted)) {
+            /* The only way this fails is a folder deleted from the picker
+               while this panel sat open, still offering it. */
+            const hint = form.querySelector('#saveHint');
+            hint.textContent = 'Saved, but that folder no longer exists.';
+            hint.style.color = 'var(--danger)';
+          }
+        } else if (form.querySelector('#f-folder') && !f.get('parentId')) {
+          Store.setNodeFolder(node.id, null);
         }
         /* Moving a branch can make a connection impossible to draw, and the
            store drops it rather than refusing the move. Saying nothing would

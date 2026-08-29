@@ -1134,6 +1134,18 @@ check('and the rest are loose',          grouped.loose.map(f => f.id), ['cpp']);
 
 /* a folder is for fields; a sub-topic already has a place */
 check('a sub-topic cannot be filed',     Store.setNodeFolder('seq', maths.id), null);
+
+/* Nor can a field keep a shelf once it stops being one: it would go on
+   counting towards a folder that no longer lists it, which is how a folder
+   that looks empty ends up judged by a topic that is not on it. */
+check('a field on a shelf', Store.byId('pure').folderId, maths.id);
+Store.updateNode('pure', { parentId: 'analysis' });
+check('moving it under another topic takes it off',  Store.byId('pure').folderId, null);
+check('and the folder no longer counts it',
+      Store.fieldGroups().folders[0].fields.map(f => f.id), ['analysis']);
+Store.updateNode('pure', { parentId: null });
+check('bringing it back does not put it back on a shelf', Store.byId('pure').folderId, null);
+Store.setNodeFolder('pure', maths.id);
 check('nor can a field go on a folder that is not there',
       Store.setNodeFolder('cpp', 'no-such-folder'), null);
 

@@ -272,7 +272,8 @@
       const btn = document.createElement('button');
       btn.className = 'tab tab-folder' + (holdsActive ? ' is-active' : '');
       btn.dataset.folder = folder.id;
-      btn.setAttribute('aria-haspopup', 'true');
+      btn.setAttribute('aria-haspopup', 'listbox');
+      btn.setAttribute('aria-controls', 'folderMenu');
       btn.setAttribute('aria-expanded', String(openFolderMenu === folder.id));
       btn.innerHTML =
         `<span class="tab-folder-icon">&#128193;</span>` +
@@ -311,6 +312,13 @@
     groups.loose.forEach(field => strip.appendChild(tab(field.name, { fieldId: field.id })));
 
     const fields = Store.roots();
+
+    /* A rebuilt chip picks its own expanded state up from openFolderMenu, but
+       nothing rebuilds a chip for a folder that has just been deleted — so a
+       panel left hanging over one is put away here. */
+    if (openFolderMenu && !strip.querySelector(`.tab-folder[data-folder="${openFolderMenu}"]`)) {
+      closeFolderMenu();
+    }
 
     const count = document.getElementById('fieldPickerCount');
     if (count) count.textContent = fields.length === 1 ? '1 field' : fields.length + ' fields';
@@ -407,11 +415,13 @@
     group.fields.forEach((field, i) => {
       const row = document.createElement('button');
       row.className = 'picker-row';
+      row.setAttribute('role', 'option');
       row.dataset.field = field.id;
       if (i === folderMenuIndex) row.classList.add('is-cursor');
 
       const open = currentView === 'tree' && field.id === activeField;
       row.classList.toggle('is-open', open);
+      row.setAttribute('aria-selected', String(open));
       row.innerHTML =
         '<span class="dot" style="background:var(' + Store.STATUS_BY_ID[field.status].cssVar + ')"></span>' +
         '<span class="picker-name">' + escapeHtml(field.name) + '</span>' +
@@ -430,6 +440,13 @@
       });
       menu.appendChild(row);
     });
+
+    /* The panel scrolls once a folder holds more than fits, so arrowing down
+       has to bring the cursor with it or Enter opens something unseen. */
+    const cursor = menu.querySelector('.is-cursor');
+    if (cursor && typeof cursor.scrollIntoView === 'function') {
+      cursor.scrollIntoView({ block: 'nearest' });
+    }
   }
 
   const folderMenuIsOpen = () => !document.getElementById('folderMenu').hidden;
@@ -444,6 +461,16 @@
        panel is up rather than from inside it. */
     document.addEventListener('keydown', ev => {
       if (!folderMenuIsOpen()) return;
+
+      /* Focus has moved into something being typed into, so the panel is no
+         longer what the keyboard is aimed at. Taking Enter here would swallow
+         the search box's own Enter and open a field instead of running the
+         search. The panel gets out of the way rather than intercepting. */
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) {
+        closeFolderMenu();
+        return;
+      }
+
       const group = Store.fieldGroups().folders.find(g => g.folder.id === openFolderMenu);
       const fields = group ? group.fields : [];
 
@@ -516,6 +543,10 @@
   }
 
   function toggleFolder(id) {
+    /* A search shows every folder open regardless, so folding one there would
+       change nothing on screen and then surprise the person once they cleared
+       the box. */
+    if (document.getElementById('fieldPickerSearch').value.trim()) return;
     if (shutFolders.has(id)) shutFolders.delete(id); else shutFolders.add(id);
     persistUi();
     renderPickerList();
@@ -561,10 +592,15 @@
           '<span class="picker-name">' + escapeHtml(entry.name) + '</span>' +
           '<span class="picker-meta">' +
             (entry.count === 1 ? '1 field' : entry.count + ' fields') + '</span>' +
+          '<span class="picker-edit" role="button" tabindex="-1" ' +
+            'title="Rename this folder">\u270E</span>' +
           '<span class="picker-del" role="button" tabindex="-1" ' +
             'title="Remove this folder — the fields on it stay">&times;</span>';
-        row.title = 'Show or hide what is in ' + entry.name +
-                    ' \u2014 double-click to rename it';
+        row.title = 'Show or hide what is in ' + entry.name;
+        row.querySelector('.picker-edit').addEventListener('click', ev => {
+          ev.stopPropagation();
+          renameFolderInline(row, entry);
+        });
         row.querySelector('.picker-del').addEventListener('click', ev => {
           ev.stopPropagation();
           const freed = Store.deleteFolder(entry.id);
@@ -572,6 +608,10 @@
           persistUi();
           renderPickerList();
           renderTabs();
+          /* An open Details panel is still offering the folder that has just
+             gone; rebuilding it drops the choice rather than letting someone
+             pick something the store will quietly refuse. */
+          Views.renderInspector(selectedId);
           toast(freed
             ? `Folder removed — ${freed === 1 ? 'its field is' : 'its ' + freed + ' fields are'} back at the top level.`
             : 'Folder removed.');
@@ -589,9 +629,7 @@
         closeFieldPicker();
         openField(entry.id);
       });
-      if (entry.kind === 'folder') {
-        row.addEventListener('dblclick', ev => { ev.stopPropagation(); renameFolderInline(row, entry); });
-      }
+
       row.addEventListener('mousemove', () => {
         if (pickerIndex === i) return;
         pickerIndex = i;
@@ -761,6 +799,19 @@
 
     search.addEventListener('input', () => { pickerIndex = 0; renderPickerList(); });
 
+    /* Delegated, because the first click of a double-click toggles the folder
+       and rebuilds the list — a handler bound to the row would be listening
+       from an element that is no longer in the document by the time the
+       second click lands. */
+    document.getElementById('fieldPickerList').addEventListener('dblclick', ev => {
+      const row = ev.target.closest('.picker-folder');
+      if (!row || !row.dataset.folder) return;
+      const folder = Store.folders().find(f => f.id === row.dataset.folder);
+      if (!folder) return;
+      ev.stopPropagation();
+      renameFolderInline(row, folder);
+    });
+
     search.addEventListener('keydown', ev => {
       const rows = pickerRows();
       if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
@@ -817,7 +868,13 @@
       strip.scrollLeft += ev.deltaY;
     }, { passive: false });
 
-    strip.addEventListener('scroll', syncStripOverflow);
+    strip.addEventListener('scroll', () => {
+      syncStripOverflow();
+      /* A panel fixed to the viewport cannot follow a chip that is sliding
+         out from under it, so it is put away rather than left pointing at
+         nothing in particular. */
+      closeFolderMenu();
+    });
     window.addEventListener('resize', syncStripOverflow);
   }
 
@@ -1023,6 +1080,8 @@
 
       if (ev.key === '/') {
         ev.preventDefault();
+        /* Typing somewhere else is leaving the panel, so it goes away. */
+        closeFolderMenu();
         document.getElementById('search').focus();
       } else if (ev.key === 'N') {
         ev.preventDefault();

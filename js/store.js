@@ -472,6 +472,11 @@ const Store = (() => {
        borrowing, which the tree cannot draw. The offending connection is
        dropped rather than the move being refused: the person moved the topic
        deliberately, and a connection is the cheaper thing to make again. */
+    /* A folder is a shelf for fields. A topic that has just been given a
+       parent is not one any more, so it puts down its folder — otherwise it
+       goes on counting towards a shelf it is not on, which is how a folder
+       that looks empty ends up being judged private. */
+    if (node.parentId !== null) node.folderId = null;
     lastPruned = 'parentId' in patch ? pruneLoopingConnections() : 0;
     persist();
     return node;
@@ -2075,7 +2080,8 @@ const Store = (() => {
          to publish, which is what keeps a new folder syncing between
          devices. */
       folders: state.folders.filter(f => {
-        const on = state.nodes.filter(n => n.folderId === f.id);
+        /* Only fields count: nothing else can be on a shelf. */
+        const on = roots().filter(n => n.folderId === f.id);
         return on.length ? on.some(n => priv.has(n.id) === wantPrivate) : !wantPrivate;
       }),
       /* Applications only ever exist in the private half. */

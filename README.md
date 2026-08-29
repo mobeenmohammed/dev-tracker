@@ -77,8 +77,9 @@ tab are all exactly as they were.
   visits, and the folder holding the field you are on always opens.
 - **Searching opens folders**, because a closed one hiding the only match would
   look like no match at all.
-- **Rename** by double-clicking a folder; **remove** it with the × on its row.
-  Removing a folder never removes a field — they come back to the top level.
+- **Rename** with the ✎ on a folder's row in the picker, or by double-clicking
+  it; **remove** it with the ×. Removing a folder never removes a field — they
+  come back to the top level.
 
 In the tab strip a folder is **one chip however much is filed on it**, showing
 its name and its count. Its fields are not tabs of their own; they drop below
