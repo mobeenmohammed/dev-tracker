@@ -79,8 +79,26 @@ const probeRow = cls => {
 /* Set apart by weight, colour and a caret — not by shouting the name. */
 check('a folder row is set apart from a field row',
       /\.picker-folder\s+\.picker-name\s*\{[^}]*font-weight/.test(css));
+/* Section headings elsewhere are uppercased on purpose, so this asks about the
+   folder name itself rather than about the stylesheet as a whole. */
 check('and folder names are left as they were typed',
-      !/text-transform:\s*uppercase/.test(css), 'something still uppercases a name');
+      (() => {
+        const row = doc.createElement('div');
+        row.className = 'picker-row picker-folder';
+        const name = doc.createElement('span');
+        name.className = 'picker-name';
+        row.appendChild(name);
+        doc.querySelector('#fieldPickerList').appendChild(row);
+        return window.getComputedStyle(name).textTransform !== 'uppercase';
+      })(), 'the folder name is still uppercased');
+
+check('and the same in the strip',
+      (() => {
+        const chip = doc.createElement('button');
+        chip.className = 'tab tab-folder';
+        doc.querySelector('#fieldTabsScroll').appendChild(chip);
+        return window.getComputedStyle(chip).textTransform !== 'uppercase';
+      })(), 'the folder chip is still uppercased');
 check('and the fields on it are indented under it',
       /\.picker-row\.is-shelved\s*\{[^}]*padding-left/.test(css));
 check('the indent rail can be positioned against the row',
