@@ -242,6 +242,13 @@ const Store = (() => {
       },
       nodes,
       folders,
+      /* A stopwatch still running is picked back up where it was, unless it
+         was left going long enough that nobody was there for it. A timer
+         against a topic that no longer exists is dropped. */
+      focus_timer: (() => {
+        const revived = reviveFocus(normalizeFocus(raw.focus_timer));
+        return revived && ids.has(revived.nodeId) ? revived : null;
+      })(),
       sessions,
       focus,
       problems,
@@ -510,6 +517,9 @@ const Store = (() => {
     state.journal  = state.journal.filter(e => !doomed.has(e.nodeId));
     state.links    = state.links.filter(l => !doomed.has(l.from) && !doomed.has(l.to));
     state.connections = state.connections.filter(c => !doomed.has(c.from) && !doomed.has(c.to));
+    /* A stopwatch running against a topic that has just gone has nothing left
+       to log against, so it stops rather than logging into nothing. */
+    if (state.focus_timer && doomed.has(state.focus_timer.nodeId)) state.focus_timer = null;
 
     /* These outlive the topic, so they lose the link rather than the record. */
     state.problems.forEach(p => { if (doomed.has(p.nodeId)) p.nodeId = null; });
@@ -527,6 +537,143 @@ const Store = (() => {
 
     persist();
     return doomed.size;
+  }
+
+  /* ---------------- the focus stopwatch ----------------
+
+     A timer you set counts down whether or not you are there. A stopwatch
+     counts what actually happened: it runs while you work, it pauses when
+     something takes you away, and what it logs is time spent rather than time
+     intended. The interruptions are recorded rather than hidden, because
+     knowing you were pulled away four times is the useful part.
+
+     Nothing here ticks. Elapsed time is derived from timestamps, so the clock
+     on screen can update every second without the state being written every
+     second — and a reload picks the session back up exactly where it was. */
+
+  /* Left running overnight, wall-clock time would claim a study session
+     nobody had. An open stretch longer than this is not believed. */
+  const FOCUS_ABANDONED_MS = 8 * 60 * 60 * 1000;
+
+  function normalizeFocus(t) {
+    if (!t || !t.nodeId) return null;
+    const num = (v, min = 0) => (Number.isFinite(Number(v)) ? Math.max(min, Number(v)) : min);
+    return {
+      nodeId:        String(t.nodeId),
+      intent:        typeof t.intent === 'string' ? t.intent : '',
+      /* When the stretch that is running now began; null while paused. */
+      startedAt:     t.startedAt == null ? null : num(t.startedAt),
+      accumulatedMs: num(t.accumulatedMs),
+      pausedMs:      num(t.pausedMs),
+      pausedAt:      t.pausedAt == null ? null : num(t.pausedAt),
+      interruptions: Math.round(num(t.interruptions)),
+      openedAt:      t.openedAt || nowISO(),
+      /* Set when a stretch was found too old to believe, so the page can say
+         so rather than quietly changing the number. */
+      abandoned:     !!t.abandoned,
+    };
+  }
+
+  /* A session found still running from long ago is paused, and the open
+     stretch is thrown away rather than counted: nobody worked for nine hours
+     without touching the page. What had already been banked is kept. */
+  function reviveFocus(timer) {
+    if (!timer || timer.startedAt == null) return timer;
+    const open = Date.now() - timer.startedAt;
+    if (open <= FOCUS_ABANDONED_MS) return timer;
+    return { ...timer, startedAt: null, pausedAt: Date.now(), abandoned: true };
+  }
+
+  const activeFocus = () => state.focus_timer;
+
+  /* What the clock shows: everything banked, plus the stretch running now. */
+  function focusElapsedMs() {
+    const t = state.focus_timer;
+    if (!t) return 0;
+    const open = t.startedAt == null ? 0 : Math.max(0, Date.now() - t.startedAt);
+    return t.accumulatedMs + open;
+  }
+
+  /* How long has been spent away, including a pause still going on. */
+  function focusPausedMs() {
+    const t = state.focus_timer;
+    if (!t) return 0;
+    const open = t.pausedAt == null ? 0 : Math.max(0, Date.now() - t.pausedAt);
+    return t.pausedMs + open;
+  }
+
+  function startFocus(nodeId, intent = '') {
+    if (state.focus_timer) return null;          // one at a time, deliberately
+    if (!byId(nodeId)) return null;
+    state.focus_timer = normalizeFocus({
+      nodeId, intent, startedAt: Date.now(), openedAt: nowISO(),
+    });
+    persist();
+    return state.focus_timer;
+  }
+
+  function pauseFocus() {
+    const t = state.focus_timer;
+    if (!t || t.startedAt == null) return t || null;
+    t.accumulatedMs += Math.max(0, Date.now() - t.startedAt);
+    t.startedAt = null;
+    t.pausedAt = Date.now();
+    t.interruptions += 1;
+    persist();
+    return t;
+  }
+
+  function resumeFocus() {
+    const t = state.focus_timer;
+    if (!t || t.startedAt != null) return t || null;
+    if (t.pausedAt != null) t.pausedMs += Math.max(0, Date.now() - t.pausedAt);
+    t.pausedAt = null;
+    t.startedAt = Date.now();
+    t.abandoned = false;
+    persist();
+    return t;
+  }
+
+  function setFocusIntent(text) {
+    const t = state.focus_timer;
+    if (!t) return null;
+    t.intent = String(text || '');
+    persist();
+    return t;
+  }
+
+  function discardFocus() {
+    const had = !!state.focus_timer;
+    state.focus_timer = null;
+    persist();
+    return had;
+  }
+
+  /* Stopping banks the time as an ordinary session, so everything that already
+     counts study time — the heatmap, the streak, a topic's total — counts this
+     without knowing where it came from. Under half a minute rounds to nothing,
+     and logging a nought-minute session would be a lie either way. */
+  function stopFocus() {
+    const t = state.focus_timer;
+    if (!t) return null;
+
+    const elapsedMs = focusElapsedMs();
+    const pausedMs = focusPausedMs();
+    const minutes = Math.round(elapsedMs / 60000);
+    const summary = {
+      nodeId: t.nodeId, elapsedMs, pausedMs, minutes,
+      interruptions: t.interruptions, intent: t.intent, session: null,
+    };
+
+    state.focus_timer = null;
+    if (minutes > 0) {
+      summary.session = addSession({
+        nodeId: t.nodeId, date: todayISO(), minutes, note: t.intent.trim(),
+      });
+    } else {
+      persist();
+    }
+    return summary;
   }
 
   function addSession({ nodeId, date, minutes, note }) {
@@ -2177,6 +2324,11 @@ const Store = (() => {
     };
   }
 
+  /* A running stopwatch is not data about what has been learned; it is where
+     the page had got to. It belongs in neither file, and publishing it would
+     put a private topic's id and what someone was about to do into a public
+     one. Reloading picks it up from local storage regardless. */
+
   function toJSON() {
     const { nodes, folders, sessions, focus, problems, links, connections, journal, goals, projects } = partition(false);
     return JSON.stringify({
@@ -2285,6 +2437,8 @@ const Store = (() => {
     lastWorked, daysBetween, relativeDay,
     focusFor, focusDates, focusSummary, addTask, toggleTask, updateTask, deleteTask, carryOverTo,
     addNode, updateNode, deleteNode, addSession, deleteSession, updateProfile,
+    activeFocus, focusElapsedMs, focusPausedMs, startFocus, pauseFocus, resumeFocus,
+    setFocusIntent, stopFocus, discardFocus,
     addItem, toggleItem, updateItem, deleteItem, checklistOf,
     addEntry, updateEntry, deleteEntry, journalFor, obsidianUrl,
     activityOn, activityLevel, localDateOf,

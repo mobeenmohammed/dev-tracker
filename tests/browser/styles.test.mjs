@@ -106,6 +106,15 @@ check('and what is inside a folder is marked as nested',
 check('the indent rail can be positioned against the row',
       probeRow('picker-row').position === 'relative');
 
+/* The focus screen covers the app on purpose, so it has to be genuinely out of
+   the way when it is not up — and it must start that way. */
+check('the focus screen starts hidden', doc.querySelector('#focusScreen').hasAttribute('hidden'));
+check('and it is over everything when it is not',
+      window.getComputedStyle(doc.querySelector('#focusScreen')).position === 'fixed');
+check('the pill starts hidden too', doc.querySelector('#focusPill').hasAttribute('hidden'));
+check('the clock is set in a fixed-width face, so it does not jitter per second',
+      /#focusElapsed\s*\{[^}]*font-variant-numeric:\s*tabular-nums/.test(css));
+
 /* The picker hangs below the bar rather than taking room inside it. */
 check('the picker is taken out of the flow',
       window.getComputedStyle(doc.querySelector('#fieldPicker')).position === 'absolute');

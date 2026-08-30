@@ -1299,5 +1299,109 @@ check('a kept folder never names a parent that was not kept',
       publishedFolders.every(f => !f.parentId || publishedFolders.some(p => p.id === f.parentId)),
       true);
 
+/* --- the focus stopwatch --- */
+
+/* Elapsed time is derived from timestamps rather than counted, so a test can
+   move the clock by rewriting when the running stretch began. */
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'cpp', parentId: null, name: 'C++', status: 'planned' },
+          { id: 'rust', parentId: null, name: 'Rust' }],
+}));
+const rewind = ms => {
+  const t = Store.activeFocus();
+  if (t.startedAt != null) t.startedAt -= ms;
+  else t.pausedAt -= ms;
+};
+const mins = ms => Math.round(ms / 60000);
+
+check('nothing is being timed to begin with', Store.activeFocus(), null);
+check('a stopwatch starts on a topic', !!Store.startFocus('cpp', 'Move semantics'), true);
+check('only one runs at a time',       Store.startFocus('rust', 'x'), null);
+check('and never on a topic that is not there',
+      (Store.discardFocus(), Store.startFocus('ghost')), null);
+
+Store.startFocus('cpp', 'Move semantics');
+rewind(10 * 60000);
+check('it counts up while it runs',    mins(Store.focusElapsedMs()), 10);
+
+Store.pauseFocus();
+check('pausing banks what has run',    mins(Store.focusElapsedMs()), 10);
+rewind(3 * 60000);
+check('and time away is not counted',  mins(Store.focusElapsedMs()), 10);
+check('but it is remembered',          mins(Store.focusPausedMs()), 3);
+check('as is being interrupted',       Store.activeFocus().interruptions, 1);
+check('pausing twice over changes nothing',
+      (Store.pauseFocus(), Store.activeFocus().interruptions), 1);
+
+Store.resumeFocus();
+rewind(5 * 60000);
+check('resuming carries on from where it was', mins(Store.focusElapsedMs()), 15);
+check('resuming twice over changes nothing',
+      (Store.resumeFocus(), mins(Store.focusElapsedMs())), 15);
+
+const logged = Store.stopFocus();
+check('stopping logs what actually ran',  logged.minutes, 15);
+check('with the note it was given',       logged.session.note, 'Move semantics');
+check('against the right topic',          logged.session.nodeId, 'cpp');
+check('dated today',                      logged.session.date, Store.todayISO());
+check('and it reports the interruptions', logged.interruptions, 1);
+check('the topic now counts it',          Store.minutesFor('cpp', false), 15);
+check('so does the day',                  Store.activityOn(Store.todayISO()).minutes, 15);
+check('logging it marks the topic underway', Store.byId('cpp').status, 'learning');
+check('and the stopwatch is cleared',     Store.activeFocus(), null);
+check('stopping nothing does nothing',    Store.stopFocus(), null);
+
+/* Rounding: under half a minute is not a session. */
+const before = Store.state.sessions.length;
+Store.startFocus('cpp');
+const tooShort = Store.stopFocus();
+check('a glance is not a session',        [tooShort.minutes, tooShort.session], [0, null]);
+check('and nothing was written',          Store.state.sessions.length, before);
+
+/* Discarding throws it away rather than logging it. */
+Store.startFocus('cpp', 'never mind');
+rewind(20 * 60000);
+check('discarding says there was one',    Store.discardFocus(), true);
+check('it is gone',                       Store.activeFocus(), null);
+check('and nothing was logged',           Store.state.sessions.length, before);
+check('discarding nothing says so',       Store.discardFocus(), false);
+
+/* It survives a reload, mid-flight. */
+Store.startFocus('cpp', 'chapter 3');
+rewind(7 * 60000);
+Store.setFocusIntent('chapter 3');
+Store.importJSON(Store.toJSON().replace(/}$/, '}'));   // a public file has no timer
+check('a public file carries no stopwatch', Store.activeFocus(), null);
+
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'cpp', parentId: null, name: 'C++' }],
+  focus_timer: { nodeId: 'cpp', intent: 'chapter 3', startedAt: Date.now() - 7 * 60000,
+                 accumulatedMs: 0, pausedMs: 0, interruptions: 0 },
+}));
+check('but a reload picks one back up',   mins(Store.focusElapsedMs()), 7);
+check('with what was being done',         Store.activeFocus().intent, 'chapter 3');
+
+/* Left running overnight, wall time would claim a session nobody had. */
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'cpp', parentId: null, name: 'C++' }],
+  focus_timer: { nodeId: 'cpp', startedAt: Date.now() - 11 * 3600 * 1000,
+                 accumulatedMs: 25 * 60000, pausedMs: 0, interruptions: 0 },
+}));
+check('a stopwatch left running is paused', Store.activeFocus().startedAt, null);
+check('and says so',                        Store.activeFocus().abandoned, true);
+check('the stretch nobody was there for is dropped',
+      mins(Store.focusElapsedMs()), 25);
+
+/* A timer against a topic that is gone has nothing to log against. */
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'cpp', parentId: null, name: 'C++' }],
+  focus_timer: { nodeId: 'vanished', startedAt: Date.now() },
+}));
+check('a stopwatch on a missing topic is dropped', Store.activeFocus(), null);
+
+Store.startFocus('cpp');
+Store.deleteNode('cpp');
+check('deleting the topic being timed stops the clock', Store.activeFocus(), null);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

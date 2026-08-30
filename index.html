@@ -43,6 +43,9 @@
         <button data-action="reset" class="danger">Reset to seed data</button>
       </div>
     </div>
+    <!-- Only there while a stopwatch is running, so it is never a control
+         looking for something to do. -->
+    <button id="focusPill" class="focus-pill" hidden aria-live="polite"></button>
     <button id="themeBtn" class="btn btn-icon" title="Toggle theme" aria-label="Toggle theme">◐</button>
   </div>
 </header>
@@ -78,6 +81,47 @@
     <button class="tab tab-fixed" data-view="stats" role="tab">Stats</button>
   </div>
 </nav>
+
+<!-- The focus screen. Over everything, because focusing on one topic is what
+     it is for, and dismissable without stopping the clock. -->
+<div id="focusScreen" class="focus-screen" role="dialog" aria-modal="true"
+     aria-labelledby="focusTopic" hidden>
+  <div class="focus-panel">
+    <div class="focus-head">
+      <div>
+        <p class="focus-eyebrow">Focusing on</p>
+        <h2 id="focusTopic"></h2>
+        <p id="focusWhere" class="focus-where muted"></p>
+      </div>
+      <button id="focusClose" class="btn btn-icon" title="Leave this open in the background (Esc)"
+              aria-label="Back, leaving the clock running">&times;</button>
+    </div>
+
+    <p id="focusNotice" class="focus-notice" hidden></p>
+
+    <div class="focus-clock">
+      <span id="focusElapsed" role="timer" aria-live="off">0:00</span>
+      <span id="focusState" class="focus-state"></span>
+    </div>
+
+    <div class="focus-away" id="focusAway"></div>
+
+    <div class="field focus-intent">
+      <label for="focusIntent">What are you doing?</label>
+      <input id="focusIntent" type="text" autocomplete="off"
+             placeholder="e.g. Move semantics, chapter 3">
+    </div>
+
+    <div class="focus-actions">
+      <button id="focusToggle" class="btn btn-primary"></button>
+      <button id="focusStop" class="btn">Stop &amp; log</button>
+      <button id="focusDiscard" class="btn danger">Discard</button>
+    </div>
+
+    <p class="focus-hint muted">Space pauses and resumes · Esc leaves it running in the background</p>
+    <div id="focusTotals" class="focus-totals"></div>
+  </div>
+</div>
 
 <!-- A folder's fields, dropped under its chip in the strip. It lives outside
      the bar because the strip scrolls sideways and would clip it. -->
@@ -385,6 +429,7 @@
 <script src="js/problems.js"></script>
 <script src="js/projects.js"></script>
 <script src="js/applications.js"></script>
+<script src="js/focus.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

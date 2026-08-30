@@ -32,11 +32,11 @@ window.prompt = () => 'Advent of Code';
 window.alert = msg => errors.push('alert(): ' + msg);
 window.matchMedia = () => ({ matches: false, addEventListener() {} });
 
-const bundle = ['js/store.js', 'js/tree.js', 'js/views.js', 'js/problems.js', 'js/projects.js', 'js/applications.js', 'js/app.js']
+const bundle = ['js/store.js', 'js/tree.js', 'js/views.js', 'js/problems.js', 'js/projects.js', 'js/applications.js', 'js/focus.js', 'js/app.js']
   .map(f => fs.readFileSync(path.join(ROOT, f), 'utf8'))
   .join(String.fromCharCode(10) + ';' + String.fromCharCode(10));
 window.eval(bundle + ';window.Store = Store; window.Tree = Tree; window.Views = Views;' +
-  'window.Problems = Problems; window.Applications = Applications; window.Projects = Projects;');
+  'window.Problems = Problems; window.Applications = Applications; window.Projects = Projects; window.Focus = Focus;');
 
 await new Promise(r => setTimeout(r, 300));
 
@@ -1780,6 +1780,173 @@ check('and the sub-folder now has a chip of its own',
 click(doc.body);
 Store.deleteFolder(inner.id);
 Store.folders().slice().forEach(f => Store.deleteFolder(f.id));
+click(tabNamed('All'));
+
+/* ---------- 19. the focus stopwatch ---------- */
+
+const Focus = window.Focus;
+const rewindClock = ms => {
+  const t = Store.activeFocus();
+  if (t.startedAt != null) t.startedAt -= ms; else t.pausedAt -= ms;
+};
+
+click(tabNamed('C++'));
+clickNode('CMake');
+check('the inspector offers the stopwatch first', !!$('#focusBtn'),
+      'no focus button in the Time section');
+check('and logging by hand is tucked underneath', !!$('.insp-manual'));
+check('the manual form is still there for backfilling', !!$('#sessionForm'));
+
+/* Starting from the inspector opens the screen. */
+click($('#focusBtn'));
+check('the focus screen opens', !$('#focusScreen').hidden);
+check('it names the topic', $('#focusTopic').textContent === 'CMake',
+      $('#focusTopic').textContent);
+check('the clock is running', !!Store.activeFocus() && Store.activeFocus().startedAt !== null);
+check('and it says so', $('#focusState').textContent === 'running', $('#focusState').textContent);
+check('the button offers to pause', $('#focusToggle').textContent === 'Pause',
+      $('#focusToggle').textContent);
+check('there is nothing to log yet', $('#focusStop').disabled);
+
+/* Pausing is the whole point: being interrupted is recorded, not hidden. */
+rewindClock(12 * 60000);
+Focus.render();
+check('the clock shows the time that has run', $('#focusElapsed').textContent === '12:00',
+      $('#focusElapsed').textContent);
+check('and stopping is now worth doing', !$('#focusStop').disabled);
+
+click($('#focusToggle'));
+check('pausing says so', $('#focusState').textContent === 'paused', $('#focusState').textContent);
+check('the button offers to resume', $('#focusToggle').textContent === 'Resume');
+check('and the interruption is reported',
+      /Pulled away 1 time/.test($('#focusAway').textContent), $('#focusAway').textContent);
+rewindClock(4 * 60000);
+Focus.render();
+check('time away does not count towards the session',
+      $('#focusElapsed').textContent === '12:00', $('#focusElapsed').textContent);
+check('but it is named', /4m of it/.test($('#focusAway').textContent), $('#focusAway').textContent);
+
+click($('#focusToggle'));
+check('resuming starts it again', $('#focusState').textContent === 'running');
+
+/* What you are doing becomes the note on the session. */
+const intent = $('#focusIntent');
+intent.value = 'Toolchain files, chapter 3';
+fire(intent, 'input');
+await new Promise(r => setTimeout(r, 450));
+check('what you are doing is saved as you type',
+      Store.activeFocus().intent === 'Toolchain files, chapter 3', Store.activeFocus().intent);
+
+/* Closing leaves it running, and the pill is the way back. */
+click($('#focusClose'));
+check('closing the screen does not stop the clock', !!Store.activeFocus());
+check('the screen is put away', $('#focusScreen').hidden);
+check('and a pill appears to get back to it', !$('#focusPill').hidden);
+check('the pill shows the time', /12:/.test($('#focusPill').textContent), $('#focusPill').textContent);
+check('the tab title says what is happening', /12:/.test(doc.title), doc.title);
+
+click($('#focusPill'));
+check('the pill brings the screen back', !$('#focusScreen').hidden);
+check('and the pill steps aside while it is up', $('#focusPill').hidden);
+
+/* Stopping logs it. */
+const minutesBefore = Store.minutesFor('cpp-cmake', false);
+const sessionsBefore = Store.state.sessions.length;
+click($('#focusStop'));
+check('stopping closes the screen', $('#focusScreen').hidden);
+check('the clock is cleared', Store.activeFocus() === null);
+check('the pill goes with it', $('#focusPill').hidden);
+check('the tab title goes back to normal', !/\d+:\d\d/.test(doc.title), doc.title);
+check('a session was logged', Store.state.sessions.length === sessionsBefore + 1);
+check('for the time that actually ran',
+      Store.minutesFor('cpp-cmake', false) === minutesBefore + 12,
+      `${Store.minutesFor('cpp-cmake', false)} vs ${minutesBefore + 12}`);
+check('carrying what you were doing',
+      Store.sessionsFor('cpp-cmake', false)[0].note === 'Toolchain files, chapter 3',
+      Store.sessionsFor('cpp-cmake', false)[0].note);
+check('and the day counts it',
+      Store.activityOn(Store.todayISO()).minutes >= 12);
+
+/* The card's clock starts the stopwatch rather than jumping to a form. */
+const clockBtn = [...nodeNamed('CMake').querySelectorAll('.card-btn')]
+  .find(b => b.dataset.act === 'log');
+check('a card offers to focus on its topic', !!clockBtn);
+check('and says so', /Focus on this topic/.test(clockBtn.title), clockBtn.title);
+click(clockBtn);
+check('clicking it starts the clock on that topic',
+      Store.activeFocus() && Store.activeFocus().nodeId === 'cpp-cmake',
+      Store.activeFocus() && Store.activeFocus().nodeId);
+
+/* Space pauses without touching the mouse; Escape leaves it running. Both
+   stay out of the way while the note has the keyboard, or a space would be a
+   space and Escape would only be leaving the field. */
+check('the note takes the keyboard on opening', doc.activeElement === $('#focusIntent'),
+      doc.activeElement.tagName);
+key($('#focusIntent'), ' ');
+check('Space in the note does not pause', Store.activeFocus().startedAt !== null);
+key($('#focusIntent'), 'Escape');
+check('Escape in the note leaves the field, not the screen',
+      !$('#focusScreen').hidden && doc.activeElement !== $('#focusIntent'),
+      doc.activeElement.tagName);
+
+key(doc.body, ' ');
+check('Space pauses', Store.activeFocus().startedAt === null);
+key(doc.body, ' ');
+check('and resumes', Store.activeFocus().startedAt !== null);
+key(doc.body, 'Escape');
+check('Escape puts the screen away', $('#focusScreen').hidden);
+check('but leaves the clock running', !!Store.activeFocus());
+
+/* Starting on a different topic asks before throwing the first one away. */
+rewindClock(9 * 60000);
+const cmakeBefore = Store.minutesFor('cpp-cmake', false);
+window.confirm = () => false;
+Focus.open('cpp-gdb');
+check('declining leaves the first one alone',
+      Store.activeFocus().nodeId === 'cpp-cmake', Store.activeFocus().nodeId);
+check('and shows it rather than doing nothing', !$('#focusScreen').hidden);
+
+window.confirm = () => true;
+Focus.open('cpp-gdb');
+check('agreeing logs the first before starting the second',
+      Store.minutesFor('cpp-cmake', false) === cmakeBefore + 9,
+      `${Store.minutesFor('cpp-cmake', false)} vs ${cmakeBefore + 9}`);
+check('and the clock is now on the new topic',
+      Store.activeFocus().nodeId === 'cpp-gdb', Store.activeFocus().nodeId);
+
+/* Discarding throws the time away instead of logging it. */
+rewindClock(6 * 60000);
+const gdbBefore = Store.minutesFor('cpp-gdb', false);
+const sessionCount = Store.state.sessions.length;
+click($('#focusDiscard'));
+check('discarding clears the clock', Store.activeFocus() === null);
+check('and logs nothing', Store.state.sessions.length === sessionCount,
+      `${Store.state.sessions.length} vs ${sessionCount}`);
+check('the topic is unchanged', Store.minutesFor('cpp-gdb', false) === gdbBefore);
+check('and the screen is closed', $('#focusScreen').hidden);
+
+/* The keyboard shortcut works on whatever is selected. */
+clickNode('CMake');
+key(doc.body, 'w');
+check('w focuses on the selected topic',
+      Store.activeFocus() && Store.activeFocus().nodeId === 'cpp-cmake',
+      Store.activeFocus() && Store.activeFocus().nodeId);
+check('and opens the screen', !$('#focusScreen').hidden);
+
+/* A stopwatch left running is picked back up, and says the stretch nobody was
+   there for was not counted. */
+Store.activeFocus().startedAt = Date.now() - 11 * 3600 * 1000;
+Store.setFocusIntent(Store.activeFocus().intent);
+const carried = JSON.parse(window.localStorage.getItem('learning-tree/state/v1'));
+Store.importJSON(JSON.stringify(carried));
+Focus.render();
+check('a stopwatch left running comes back paused',
+      Store.activeFocus() && Store.activeFocus().startedAt === null);
+check('and the screen explains itself', !$('#focusNotice').hidden);
+check('saying the lost stretch was not counted',
+      /has not been counted/.test($('#focusNotice').textContent),
+      $('#focusNotice').textContent);
+click($('#focusDiscard'));
 click(tabNamed('All'));
 
 if (errors.length) {

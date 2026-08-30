@@ -645,7 +645,7 @@ const Tree = (() => {
     actions.appendChild(action('\u270E', 'rename',  'Rename (or double-click the title)'));
     actions.appendChild(action('\u25B8', 'advance', 'Move to the next status'));
     actions.appendChild(action('\uFF0B', 'child',   'Add a sub-topic'));
-    actions.appendChild(action('\u23F1', 'log',     'Log time on this topic'));
+    actions.appendChild(action('\u23F1', 'log',     'Focus on this topic (w)'));
     return actions;
   }
 

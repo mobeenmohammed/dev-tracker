@@ -1203,6 +1203,12 @@
       } else if (ev.key === 'g') {
         ev.preventDefault();
         openFieldPicker();
+      } else if (ev.key === 'w') {
+        /* Whatever is selected, or back to whatever is already running. */
+        const timer = Store.activeFocus();
+        const target = selectedId || (timer && timer.nodeId);
+        if (target) { ev.preventDefault(); Focus.open(target); }
+        else toast('Select a topic first, then press w to focus on it.');
       }
     });
   }
@@ -1347,6 +1353,7 @@
       },
       /* From a list row: select it without leaving the list. */
       onSelect: id => selectNode(id),
+      onFocus: id => Focus.open(id),
       onChanged: refresh,
       /* A description or checklist edit saves without rebuilding the panel the
          user is typing into; only the tree and secondary views need redrawing. */
@@ -1386,11 +1393,10 @@
           Tree.startRename(child.id);
           return;
         }
+        /* The card's clock starts the stopwatch rather than jumping to a form
+           to guess at a number afterwards. */
         if (act === 'log') {
-          refresh();
-          const mins = document.querySelector('#sessionForm [name="minutes"]');
-          if (mins) { mins.focus(); mins.select(); }
-          toast('Set the minutes and press Log time.');
+          Focus.open(nodeId);
           return;
         }
         refresh();     // 'advance' and 'renamed' just need everything redrawn
@@ -1535,6 +1541,25 @@
       if (Store.hasPrivateData()) handleDataAction('export-private');
     });
     Store.onChange(syncStorageWarning);
+
+    Focus.init({
+      /* Stopping banks a session, which every total and the heatmap read, so
+         everything on screen has to be redrawn. */
+      onChanged: (done, opts = {}) => {
+        refresh();
+        if (!done || opts.quiet) return;
+        if (!done.minutes) {
+          toast('Too short to log — nothing was recorded.');
+          return;
+        }
+        const node = Store.byId(done.nodeId);
+        const away = done.interruptions
+          ? `, pulled away ${done.interruptions} time${done.interruptions === 1 ? '' : 's'}`
+          : '';
+        toast(`Logged ${done.minutes}m on ${node ? node.name : 'that topic'}${away}.`);
+      },
+      onNavigate: id => selectNode(id, { center: currentView === 'tree' }),
+    });
 
     wireDataMenu();
     wireFieldPicker();

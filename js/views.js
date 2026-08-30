@@ -9,6 +9,7 @@ const Views = (() => {
   let onSelect   = () => {};   // select a node without leaving the current view
   let onChanged  = () => {};   // tell the app something in the store changed
   let onQuietChange = () => {};// saved, but do not rebuild the panel being typed in
+  let onFocus    = () => {};   // start (or go back to) the stopwatch on a topic
 
   /* ---------------- small helpers ---------------- */
 
@@ -625,6 +626,27 @@ const Views = (() => {
       <span class="${fresh ? 'is-fresh' : 'muted'}">${worked ? 'last worked ' + esc(Store.relativeDay(worked)) : 'not started'}</span>`;
     sec.appendChild(summary);
 
+    /* The stopwatch is the first thing on offer, because guessing at a number
+       after the fact is what it exists to replace. Logging by hand stays
+       underneath it, for filling in work done away from the app. */
+    const timer = Store.activeFocus();
+    const here = timer && timer.nodeId === node.id;
+
+    const focusBtn = document.createElement('button');
+    focusBtn.type = 'button';
+    focusBtn.id = 'focusBtn';
+    focusBtn.className = 'btn btn-primary btn-focus' + (here ? ' is-running' : '');
+    focusBtn.textContent = here ? 'Back to the clock' : 'Focus on this topic';
+    focusBtn.title = here
+      ? 'This topic is being timed now'
+      : 'Start a stopwatch on this topic (w)';
+    focusBtn.addEventListener('click', () => onFocus(node.id));
+    sec.appendChild(focusBtn);
+
+    const manual = document.createElement('details');
+    manual.className = 'insp-manual';
+    manual.innerHTML = '<summary>Log time by hand</summary>';
+
     const form = document.createElement('form');
     form.id = 'sessionForm';
     form.innerHTML = `
@@ -645,7 +667,8 @@ const Views = (() => {
       });
       onChanged();
     });
-    sec.appendChild(form);
+    manual.appendChild(form);
+    sec.appendChild(manual);
 
     const sessions = Store.sessionsFor(node.id, false);
     if (sessions.length) {
@@ -1674,6 +1697,7 @@ const Views = (() => {
     onSelect   = opts.onSelect   || onSelect;
     onChanged  = opts.onChanged  || onChanged;
     onQuietChange = opts.onQuietChange || onQuietChange;
+    onFocus    = opts.onFocus    || onFocus;
   }
 
   return {

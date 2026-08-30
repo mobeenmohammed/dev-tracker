@@ -178,6 +178,56 @@ The rules that keep the picture finite and honest:
 In the **All** graph a connection pulls like parentage rather than like a
 reference, and is drawn as a dashed arrow in the connection colour.
 
+### The focus stopwatch
+
+A timer you set counts down whether or not you are at the desk. Setting 45
+minutes and being called away twice does not make it 45 minutes of work, and
+logging it as though it were is the tracker lying to you.
+
+So time is recorded with a **stopwatch** instead. It counts up while you work,
+you pause it when something takes you away, and what it logs is what actually
+happened.
+
+Start one from a card's ⏱ button, from **Focus on this topic** in the
+inspector, or with **w** on whatever is selected. You get a screen with the
+clock, the topic, and a box for what you are about to do.
+
+- **Pause** when you are interrupted, **resume** when you are back. Space does
+  both, so it costs one key.
+- Being pulled away is **counted rather than hidden**: the screen says *pulled
+  away 3 times · 12m of it*, and the count comes back in the toast when you
+  stop. It is not a telling-off, it is the number you would otherwise have to
+  guess at.
+- **What you are doing** is saved as you type and becomes the note on the
+  session, so the day detail reads *45m — CMake · Toolchain files, chapter 3*.
+- **Stop & log** banks it as an ordinary session, rounded to the nearest
+  minute. Everything that already counts study time — the heatmap, the streak,
+  a topic's total, a goal measured in hours — counts it without knowing where
+  it came from. **Discard** throws it away instead, and asks first if there was
+  anything on the clock.
+- Under half a minute rounds to nothing and logs nothing, because a
+  nought-minute session would be a lie either way.
+
+**Closing the screen does not stop the clock.** Escape or the × puts it away
+and leaves it running; a pill in the header shows the time from anywhere in the
+app and takes you back, and the browser tab title counts too, so a stopwatch is
+never left running out of sight.
+
+It survives a reload mid-session: elapsed time is derived from timestamps
+rather than counted, so nothing is lost by refreshing, and nothing is written
+to storage every second either. Left running for more than eight hours, the
+stretch since you last touched it is **not** believed — it comes back paused
+and says so, keeping what had already been banked. Nobody studies for nine
+hours without touching the page, and wall-clock time would otherwise invent a
+session out of an overnight tab.
+
+Logging by hand is still there, folded under *Log time by hand* in the
+inspector, for work done away from the app.
+
+A running stopwatch is in neither export. It is where the page had got to, not
+something learned — and publishing it would put a topic's id and what you were
+about to do into a public file.
+
 ### The cards
 
 Every topic is a card carrying its status, checklist count, when it was last
@@ -659,7 +709,7 @@ npm test
 ```
 
 The site itself has no runtime dependencies — nothing is bundled or built, and
-`index.html` loads four plain scripts. `jsdom` is a dev dependency used only to
+`index.html` loads eight plain scripts. `jsdom` is a dev dependency used only to
 drive the page in tests.
 
 | Suite | What it covers |
@@ -685,8 +735,10 @@ drive the page in tests.
 | `N` | Start a new field |
 | `g` | Go to a field — opens the picker, then type / ↑↓ / Enter |
 | `t` `d` `p` `j` `a` `l` `s` | Tree / Focus / Problems / Projects / Applications / List / Stats |
+| `w` | Focus on the selected topic — starts the stopwatch, or goes back to it |
+| `Space` | Pause or resume, while the focus screen is up |
 | `f` | Fit the tree to the screen |
-| `Esc` | Close the picker, or clear the selection |
+| `Esc` | Leave the focus screen running, close the picker, or clear the selection |
 
 ## Layout
 
@@ -699,6 +751,7 @@ js/views.js           inspector, focus, list and stats views
 js/problems.js        the Problems view and solve import
 js/projects.js        the Projects view and concept evidence
 js/applications.js    the Applications view (private data)
+js/focus.js           the stopwatch screen and the running pill
 js/app.js             bootstrap, view switching, import/export, shortcuts
 data/learning.json    the committed snapshot
 extension/            Chrome extension that syncs Codeforces and LeetCode solves
