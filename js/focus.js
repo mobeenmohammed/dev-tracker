@@ -158,6 +158,15 @@ const Focus = (() => {
   }
 
   function paint(timer, node, elapsed, live) {
+    /* The box shows what the store holds unless it is being typed into. It
+       used to be filled only when a session was started, so coming back to a
+       revived one through the pill showed an empty box — and stopping then
+       wrote that emptiness over the note. */
+    const intent = $('focusIntent');
+    if (document.activeElement !== intent && intent.value !== timer.intent) {
+      intent.value = timer.intent;
+    }
+
     $('focusTopic').textContent = node ? node.name : 'a topic that is gone';
     const field = node ? Store.domainOf(node.id) : null;
     $('focusWhere').textContent = field && field.id !== timer.nodeId ? `in ${field.name}` : '';
@@ -212,6 +221,8 @@ const Focus = (() => {
   function tick() {
     const timer = Store.activeFocus();
     if (!timer) { stopTicking(); render(); return; }
+    /* The machine may have been asleep since the last tick. */
+    if (Store.checkAbandonedFocus()) { render(); return; }
 
     const node = Store.byId(timer.nodeId);
     const elapsed = Store.focusElapsedMs();
@@ -254,7 +265,9 @@ const Focus = (() => {
     if (!Store.activeFocus()) return null;
 
     forgetPendingIntent();
-    Store.setFocusIntent($('focusIntent').value);
+    /* Only the open screen has a box worth reading. Stopping from anywhere
+       else keeps whatever note the session already carries. */
+    if (!$('focusScreen').hidden) Store.setFocusIntent($('focusIntent').value);
     const done = Store.stopFocus();
     close();
     stopTicking();

@@ -1421,5 +1421,57 @@ check('with what was being done',   Store.activeFocus().intent, 'mid-session');
 check('and the merge still happened', !!Store.byId('elsewhere'), true);
 Store.discardFocus();
 
+/* --- a stretch nobody was there for is not believed, ever --- */
+
+/* The load-time guard was the only one, so a laptop closed with the clock
+   running and reopened hours later — without a reload — logged the lot. */
+Store.importJSON(JSON.stringify({ nodes: [{ id: 'slept', parentId: null, name: 'Slept' }] }));
+Store.startFocus('slept', 'before the lid closed');
+Store.activeFocus().accumulatedMs = 25 * 60000;
+Store.activeFocus().startedAt = Date.now() - 11 * 3600 * 1000;
+
+check('the clock does not count an impossible stretch',
+      Math.round(Store.focusElapsedMs() / 60000), 25);
+check('and the check pauses it',           Store.checkAbandonedFocus(), true);
+check('saying why',                        Store.activeFocus().abandoned, true);
+check('it is paused',                      Store.activeFocus().startedAt, null);
+check('checking again does nothing',       Store.checkAbandonedFocus(), false);
+check('stopping logs only what was real',  Store.stopFocus().minutes, 25);
+
+/* A believable stretch is left alone. */
+Store.startFocus('slept');
+Store.activeFocus().startedAt = Date.now() - 40 * 60000;
+check('an ordinary session is not touched', Store.checkAbandonedFocus(), false);
+check('and still counts',                   Math.round(Store.focusElapsedMs() / 60000), 40);
+
+/* --- folders read in the order they nest --- */
+Store.importJSON(JSON.stringify({
+  nodes: [],
+  /* Made in the wrong order on purpose: the child exists before its parent. */
+  folders: [{ id: 'pure', name: 'Pure' }, { id: 'maths', name: 'Mathematics' }],
+}));
+Store.setFolderParent('pure', 'maths');
+check('raw order still has the child first', Store.folders().map(f => f.id), ['pure', 'maths']);
+check('but tree order puts the parent first',
+      Store.foldersInOrder().map(f => f.id), ['maths', 'pure']);
+check('with the depths that go with it',
+      Store.foldersInOrder().map(f => Store.folderDepth(f.id)), [0, 1]);
+
+/* --- accepting the committed file keeps a clock that is running --- */
+check('a stopwatch is running', (Store.importJSON(JSON.stringify({
+        nodes: [{ id: 'live', parentId: null, name: 'Live' }] })),
+      !!Store.startFocus('live', 'mid-session')), true);
+Store.activeFocus().startedAt -= 16 * 60000;
+check('and it survives the seed being adopted', (() => {
+  /* adoptSeed only runs when a newer file is offered, which is the banner. */
+  const seedish = { nodes: [{ id: 'live', parentId: null, name: 'Live' }],
+                    updatedAt: new Date(Date.now() + 60000).toISOString() };
+  return !!(Store.importJSON(JSON.stringify({ ...seedish, focus_timer: Store.activeFocus() }))
+            && Store.activeFocus());
+})(), true);
+check('with the minutes it had',
+      Math.round(Store.focusElapsedMs() / 60000), 16);
+Store.discardFocus();
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

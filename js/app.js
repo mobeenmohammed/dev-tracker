@@ -564,10 +564,12 @@
   }
 
   function toggleFolder(id) {
-    /* A search shows every folder open regardless, so folding one there would
-       change nothing on screen and then surprise the person once they cleared
-       the box. */
-    if (document.getElementById('fieldPickerSearch').value.trim()) return;
+    /* While the picker is filtering, every folder is shown open regardless, so
+       folding one there would change nothing on screen and then surprise the
+       person once they cleared the box. The chip panels do not filter, so the
+       guard must not reach them — a query left behind in a closed picker used
+       to freeze folders everywhere. */
+    if (pickerIsOpen() && document.getElementById('fieldPickerSearch').value.trim()) return;
     if (shutFolders.has(id)) shutFolders.delete(id); else shutFolders.add(id);
     persistUi();
     renderPickerList();
@@ -700,7 +702,7 @@
     input.setAttribute('aria-label', 'Folder name');
     editor.appendChild(input);
 
-    const targets = Store.folders()
+    const targets = Store.foldersInOrder()
       .filter(f => f.id !== entry.id && !Store.folderWouldCycle(entry.id, f.id));
     let move = null;
     if (targets.length) {
@@ -832,8 +834,14 @@
     search.value = '';
     /* The folder holding the open field is opened, or it would not be there
        to start on. */
+    /* Every folder above it, not just the one it sits in — with an outer one
+       still folded the field has no row at all, and the cursor lands on "All"
+       instead of on where you already are. */
     const current = activeField && Store.byId(activeField);
-    if (current && current.folderId) shutFolders.delete(current.folderId);
+    if (current && current.folderId) {
+      shutFolders.delete(current.folderId);
+      Store.folderAncestors(current.folderId).forEach(f => shutFolders.delete(f.id));
+    }
 
     /* Start on the field already open, so Enter on its own changes nothing. */
     pickerIndex = Math.max(0, pickerRows()
@@ -846,6 +854,8 @@
     const panel = document.getElementById('fieldPicker');
     if (!panel || panel.hidden) return;
     panel.hidden = true;
+    /* Nothing should be left filtering behind a closed panel. */
+    document.getElementById('fieldPickerSearch').value = '';
     document.getElementById('fieldPickerBtn').setAttribute('aria-expanded', 'false');
   }
 
@@ -1180,6 +1190,9 @@
         return;
       }
       if (typing || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      /* The focus screen is modal. Switching view or adding a topic behind it
+         from a stray keystroke is exactly what modal is meant to prevent. */
+      if (Focus.isOpen) return;
 
       if (ev.key === '/') {
         ev.preventDefault();

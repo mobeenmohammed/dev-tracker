@@ -719,7 +719,7 @@ const Views = (() => {
         <label for="f-folder">Folder <span class="muted">(where it is filed, not where it sits)</span></label>
         <select id="f-folder" name="folderId">
           <option value="">&mdash; no folder &mdash;</option>
-          ${Store.folders().map(d =>
+          ${Store.foldersInOrder().map(d =>
             `<option value="${esc(d.id)}" ${d.id === (node.folderId || '') ? 'selected' : ''}>` +
             `${'\u00a0\u00a0'.repeat(Store.folderDepth(d.id))}${esc(d.name)}</option>`).join('')}
         </select>

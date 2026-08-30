@@ -215,11 +215,14 @@ never left running out of sight.
 
 It survives a reload mid-session: elapsed time is derived from timestamps
 rather than counted, so nothing is lost by refreshing, and nothing is written
-to storage every second either. Left running for more than eight hours, the
-stretch since you last touched it is **not** believed — it comes back paused
-and says so, keeping what had already been banked. Nobody studies for nine
-hours without touching the page, and wall-clock time would otherwise invent a
-session out of an overnight tab.
+to storage every second either.
+
+Running unattended for more than eight hours, the open stretch is **not**
+believed — it pauses itself and says so, keeping what had already been banked.
+That holds whether the page was reloaded or the laptop was simply shut and
+opened again the next morning: nobody studies for nine hours without touching
+the page, and wall-clock time would otherwise invent a session out of a
+sleeping tab.
 
 Logging by hand is still there, folded under *Log time by hand* in the
 inspector, for work done away from the app.

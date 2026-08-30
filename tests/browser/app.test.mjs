@@ -1995,6 +1995,97 @@ check('a note left over from a discarded session does not land on the next',
       JSON.stringify((Store.activeFocus() || {}).intent));
 click($('#focusDiscard'));
 
+/* ---------- 21. what the third review turned up ---------- */
+
+/* Coming back to a running session through the pill showed an empty note box,
+   and stopping then wrote that emptiness over what had been typed. */
+click(tabNamed('C++'));
+Store.startFocus('cpp-tooling', 'Move semantics, chapter 3');
+rewindClock(14 * 60000);
+Focus.render();
+check('the store is holding the note',
+      Store.activeFocus().intent === 'Move semantics, chapter 3');
+click($('#focusPill'));
+check('coming back through the pill shows it again',
+      $('#focusIntent').value === 'Move semantics, chapter 3', $('#focusIntent').value);
+click($('#focusStop'));
+check('and stopping logs it rather than wiping it',
+      Store.sessionsFor('cpp-tooling', false)[0].note === 'Move semantics, chapter 3',
+      Store.sessionsFor('cpp-tooling', false)[0].note);
+
+/* The focus screen is modal, so the app's own shortcuts must not act behind it. */
+Focus.open('cpp-tooling');
+$('#focusIntent').blur();
+const viewBefore = !$('#view-tree').hidden;
+key(doc.body, 'l');
+check('a shortcut does not switch the view behind the modal',
+      !$('#view-tree').hidden === viewBefore, 'the view changed underneath it');
+key(doc.body, 'g');
+check('nor open the field picker under it', $('#fieldPicker').hidden);
+const nodesBefore = Store.state.nodes.length;
+key(doc.body, 'n');
+check('nor add a topic you cannot see', Store.state.nodes.length === nodesBefore);
+check('the modal is still up', !$('#focusScreen').hidden);
+click($('#focusDiscard'));
+
+/* A query left behind in a closed picker used to freeze folders everywhere. */
+const shelfF = Store.addFolder('Outer Shelf');
+const innerF = Store.addFolder('Inner Shelf', shelfF.id);
+Store.setNodeFolder('math', innerF.id);
+click(tabNamed('All'));
+
+click($('#fieldPickerBtn'));
+const pbox2 = $('#fieldPickerSearch');
+pbox2.value = 'zzz-nothing-matches';
+fire(pbox2, 'input');
+key(pbox2, 'Escape');
+check('the picker closed', $('#fieldPicker').hidden);
+check('and nothing is left filtering behind it', pbox2.value === '', pbox2.value);
+
+click($(`#fieldTabsScroll .tab[data-folder="${shelfF.id}"]`));
+const innerInPanel = () => $$('#folderMenu .picker-row').find(r => r.dataset.folder === innerF.id);
+const wasOpen = innerInPanel().classList.contains('is-expanded');
+click(innerInPanel());
+check('a sub-folder in a chip panel still folds',
+      innerInPanel().classList.contains('is-expanded') !== wasOpen,
+      'the folder would not move');
+click(doc.body);
+
+/* The picker opens every folder above the field you are on, not just one. */
+click(tabNamed('All'));
+/* With the outer folder folded away, a field two levels down has no row at
+   all, so the cursor landed on "All" rather than on where you already are. */
+
+/* Open that field, which is only reachable through the chip's panel now. */
+click($(`#fieldTabsScroll .tab[data-folder="${shelfF.id}"]`));
+/* The sub-folder was folded by the check above, so open it again first. */
+if (!$$('#folderMenu .picker-row').some(r => r.dataset.field === 'math')) {
+  click($$('#folderMenu .picker-row').find(r => r.dataset.folder === innerF.id));
+}
+const deepRow = $$('#folderMenu .picker-row').find(r => r.dataset.field === 'math');
+check('the field is reachable two levels down', !!deepRow,
+      $$('#folderMenu .picker-row').map(r => r.dataset.field || r.dataset.folder).join(','));
+click(deepRow);
+check('and it is the field in focus', Tree.rootId === 'math', String(Tree.rootId));
+
+/* Now fold the outer folder away and come back to the picker. */
+click($('#fieldPickerBtn'));
+click($$('#fieldPickerList .picker-row').find(r => r.dataset.folder === shelfF.id));
+check('the outer folder folds',
+      !$$('#fieldPickerList .picker-row').some(r => r.dataset.folder === innerF.id));
+click(doc.body);
+
+click($('#fieldPickerBtn'));
+const cursorRow = $('#fieldPickerList .picker-row.is-cursor');
+check('opening the picker unfolds every folder above the field you are on',
+      !!cursorRow && cursorRow.dataset.field === 'math',
+      cursorRow ? cursorRow.textContent.trim() : 'no cursor row');
+click(doc.body);
+
+Store.deleteFolder(innerF.id);
+Store.deleteFolder(shelfF.id);
+click(tabNamed('All'));
+
 if (errors.length) {
   console.log('--- runtime errors ---');
   errors.forEach(e => console.log('  ' + e));

@@ -112,6 +112,11 @@ check('the focus screen starts hidden', doc.querySelector('#focusScreen').hasAtt
 check('and it is over everything when it is not',
       window.getComputedStyle(doc.querySelector('#focusScreen')).position === 'fixed');
 check('the pill starts hidden too', doc.querySelector('#focusPill').hasAttribute('hidden'));
+/* Its text changes every second, so announcing it is unusable. */
+check('the pill is not a live region',
+      !doc.querySelector('#focusPill').hasAttribute('aria-live'));
+check('while the clock itself is announced only on demand',
+      doc.querySelector('#focusElapsed').getAttribute('aria-live') === 'off');
 check('the clock is set in a fixed-width face, so it does not jitter per second',
       /#focusElapsed\s*\{[^}]*font-variant-numeric:\s*tabular-nums/.test(css));
 

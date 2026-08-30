@@ -45,7 +45,10 @@
     </div>
     <!-- Only there while a stopwatch is running, so it is never a control
          looking for something to do. -->
-    <button id="focusPill" class="focus-pill" hidden aria-live="polite"></button>
+    <!-- Not a live region: its text changes every second, and announcing the
+         elapsed time once a second for a whole session is unusable. What it
+         is and what it does are in the title instead. -->
+    <button id="focusPill" class="focus-pill" hidden></button>
     <button id="themeBtn" class="btn btn-icon" title="Toggle theme" aria-label="Toggle theme">◐</button>
   </div>
 </header>

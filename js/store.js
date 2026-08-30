@@ -586,12 +586,34 @@ const Store = (() => {
 
   const activeFocus = () => state.focus_timer;
 
-  /* What the clock shows: everything banked, plus the stretch running now. */
+  /* An open stretch nobody can have been there for. Closing a laptop with the
+     clock running and opening it a day later is the same situation as finding
+     one still going at load, and has to be answered the same way. */
+  const openStretchMs = t =>
+    (t.startedAt == null ? 0 : Math.max(0, Date.now() - t.startedAt));
+  const believable = ms => ms <= FOCUS_ABANDONED_MS;
+
+  /* What the clock shows: everything banked, plus the stretch running now —
+     and not a stretch too long to believe, whether or not anything has got
+     round to pausing it yet. */
   function focusElapsedMs() {
     const t = state.focus_timer;
     if (!t) return 0;
-    const open = t.startedAt == null ? 0 : Math.max(0, Date.now() - t.startedAt);
-    return t.accumulatedMs + open;
+    const open = openStretchMs(t);
+    return t.accumulatedMs + (believable(open) ? open : 0);
+  }
+
+  /* Pauses a session that has been running unattended too long and says so.
+     Called as the clock ticks, so a tab that slept through the afternoon is
+     caught without waiting for a reload. */
+  function checkAbandonedFocus() {
+    const t = state.focus_timer;
+    if (!t || t.startedAt == null || believable(openStretchMs(t))) return false;
+    t.startedAt = null;
+    t.pausedAt = Date.now();
+    t.abandoned = true;
+    persist();
+    return true;
   }
 
   /* How long has been spent away, including a pause still going on. */
@@ -1045,6 +1067,14 @@ const Store = (() => {
     node.folderId = folderId || null;
     persist();
     return node;
+  }
+
+  /* Every folder, in the order they nest rather than the order they were made.
+     Anything that indents a flat list by depth has to walk them this way, or a
+     folder moved inside another is drawn indented above the folder it is
+     supposedly inside. */
+  function foldersInOrder(parentId = null) {
+    return childFolders(parentId).flatMap(f => [f, ...foldersInOrder(f.id)]);
   }
 
   /* Every field beneath a folder, however deep — what a folder is really
@@ -2413,7 +2443,11 @@ const Store = (() => {
 
   function adoptSeed() {
     if (!seedMeta) return false;
-    state = normalize(seedMeta.data);
+    /* Accepting the banner is loading a file, not throwing away the minutes
+       on a clock that is running right now — the same reasoning that keeps one
+       alive through a merge. It only goes if its topic did not survive. */
+    const running = state.focus_timer;
+    state = normalize({ ...seedMeta.data, focus_timer: running });
     seedMeta = null;
     persist();
     return true;
@@ -2441,7 +2475,8 @@ const Store = (() => {
     lastWorked, daysBetween, relativeDay,
     focusFor, focusDates, focusSummary, addTask, toggleTask, updateTask, deleteTask, carryOverTo,
     addNode, updateNode, deleteNode, addSession, deleteSession, updateProfile,
-    activeFocus, focusElapsedMs, focusPausedMs, startFocus, pauseFocus, resumeFocus,
+    activeFocus, focusElapsedMs, focusPausedMs, checkAbandonedFocus,
+    startFocus, pauseFocus, resumeFocus,
     setFocusIntent, stopFocus, discardFocus,
     addItem, toggleItem, updateItem, deleteItem, checklistOf,
     addEntry, updateEntry, deleteEntry, journalFor, obsidianUrl,
@@ -2460,7 +2495,7 @@ const Store = (() => {
     addLink, updateLink, deleteLink, linksFor, relatedTo, LINK_TYPES, prerequisiteWarnings,
     folders, folderById, addFolder, renameFolder, deleteFolder, setNodeFolder,
     setFolderParent, folderWouldCycle, childFolders, folderAncestors, folderDepth,
-    fieldsOn, folderFieldCount, folderTree,
+    fieldsOn, folderFieldCount, folderTree, foldersInOrder,
     addConnection, deleteConnection, connectionsFor, connectedInto,
     canConnect, connectableInto,
     get lastPrunedConnections() { return lastPruned; },
