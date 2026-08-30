@@ -207,6 +207,21 @@ const Store = (() => {
       .filter(f => !seenFolders.has(f.id) && seenFolders.add(f.id));
     nodes.forEach(n => { if (n.folderId && !seenFolders.has(n.folderId)) n.folderId = null; });
 
+    /* A folder inside one that is not here comes out to the top level, and so
+       does one that turns out to be inside itself — a file with a loop in it
+       loads as a tree missing that link rather than as a tree that hangs. */
+    const folderMap = new Map(folders.map(f => [f.id, f]));
+    folders.forEach(f => { if (f.parentId && !folderMap.has(f.parentId)) f.parentId = null; });
+    folders.forEach(f => {
+      const seen = new Set([f.id]);
+      let up = f.parentId;
+      while (up) {
+        if (seen.has(up)) { f.parentId = null; break; }
+        seen.add(up);
+        up = (folderMap.get(up) || {}).parentId || null;
+      }
+    });
+
     const applications = (Array.isArray(raw.applications) ? raw.applications : [])
       .map(normalizeApplication)
       .filter(a => a.company);
@@ -779,16 +794,69 @@ const Store = (() => {
 
   function normalizeFolder(f) {
     return {
-      id:   String(f.id || uid('d')),
-      name: String(f.name || 'Folder').trim() || 'Folder',
+      id:       String(f.id || uid('d')),
+      name:     String(f.name || 'Folder').trim() || 'Folder',
+      /* A folder may sit inside another, so a broad subject can be split into
+         its parts without every part becoming a top-level heading. */
+      parentId: f.parentId == null ? null : String(f.parentId),
     };
   }
 
   const folders = () => state.folders;
+  const folderById = id => state.folders.find(f => f.id === id) || null;
 
-  function addFolder(name = 'New folder') {
-    const folder = normalizeFolder({ id: uid('d'), name });
+  /* Folders under one folder, or the top-level ones when given null. */
+  const childFolders = parentId =>
+    state.folders.filter(f => (f.parentId || null) === (parentId || null));
+
+  /* The chain from a folder up to the top, nearest first. */
+  function folderAncestors(id) {
+    const chain = [];
+    const seen = new Set();
+    let f = folderById(id);
+    while (f && f.parentId && !seen.has(f.parentId)) {
+      seen.add(f.parentId);
+      f = folderById(f.parentId);
+      if (f) chain.push(f);
+    }
+    return chain;
+  }
+
+  const folderDepth = id => folderAncestors(id).length;
+
+  /* Would putting `id` inside `parentId` make the folder contain itself? */
+  const folderWouldCycle = (id, parentId) => {
+    if (!parentId) return false;
+    if (id === parentId) return true;
+    return folderAncestors(parentId).some(f => f.id === id);
+  };
+
+  /* Fields filed directly on a folder. */
+  const fieldsOn = folderId => roots().filter(n => (n.folderId || null) === (folderId || null));
+
+  /* Everything beneath a folder, sub-folders included — which is the number
+     worth showing, since a folder holding only sub-folders still holds work. */
+  function folderFieldCount(folderId) {
+    let total = fieldsOn(folderId).length;
+    childFolders(folderId).forEach(f => { total += folderFieldCount(f.id); });
+    return total;
+  }
+
+  function addFolder(name = 'New folder', parentId = null) {
+    const parent = parentId && folderById(parentId) ? parentId : null;
+    const folder = normalizeFolder({ id: uid('d'), name, parentId: parent });
     state.folders.push(folder);
+    persist();
+    return folder;
+  }
+
+  function setFolderParent(id, parentId) {
+    const folder = folderById(id);
+    if (!folder) return null;
+    const target = parentId || null;
+    if (target && !folderById(target)) return null;
+    if (folderWouldCycle(id, target)) return null;
+    folder.parentId = target;
     persist();
     return folder;
   }
@@ -803,16 +871,20 @@ const Store = (() => {
     return folder;
   }
 
-  /* Removing a shelf must never remove what was on it: the fields come back
-     out to the top level, which is where they were before there were shelves. */
+  /* Removing a shelf must never remove what was on it. Its fields come out to
+     wherever it was — the folder above it, or the top level — and so do the
+     folders inside it, so nothing is orphaned and nothing is destroyed. */
   function deleteFolder(id) {
-    const had = state.folders.length;
+    const folder = folderById(id);
+    if (!folder) return 0;
+    const up = folder.parentId || null;
+
     state.folders = state.folders.filter(f => f.id !== id);
-    if (state.folders.length === had) return 0;
+    state.folders.forEach(f => { if (f.parentId === id) f.parentId = up; });
 
     let freed = 0;
     state.nodes.forEach(n => {
-      if (n.folderId === id) { n.folderId = null; freed++; }
+      if (n.folderId === id) { n.folderId = up; freed++; }
     });
     persist();
     return freed;
@@ -828,18 +900,25 @@ const Store = (() => {
     return node;
   }
 
-  /* The fields, arranged the way they are meant to be read: each folder with
-     what is on it, then everything still loose, in the order they were made. */
-  function fieldGroups() {
-    const loose = [];
-    const byFolder = new Map(state.folders.map(f => [f.id, []]));
-    roots().forEach(field => {
-      const shelf = field.folderId && byFolder.get(field.folderId);
-      (shelf || loose).push(field);
-    });
+  /* Every field beneath a folder, however deep — what a folder is really
+     holding, which is the question privacy has to ask of it. */
+  function fieldsBeneathFolder(folderId) {
+    return childFolders(folderId).reduce(
+      (all, f) => all.concat(fieldsBeneathFolder(f.id)), fieldsOn(folderId));
+  }
+
+  /* Everything under one folder, arranged the way it is meant to be read:
+     the folders inside it first, each with their own contents, then the fields
+     filed directly on it. Given null it describes the top level, so the same
+     shape serves the whole picker and any one folder's panel. */
+  function folderTree(parentId = null) {
     return {
-      folders: state.folders.map(f => ({ folder: f, fields: byFolder.get(f.id) || [] })),
-      loose,
+      folders: childFolders(parentId).map(folder => ({
+        folder,
+        count: folderFieldCount(folder.id),
+        ...folderTree(folder.id),
+      })),
+      fields: fieldsOn(parentId),
     };
   }
 
@@ -2079,11 +2158,20 @@ const Store = (() => {
          stays out of the public file; an empty one names nothing and is safe
          to publish, which is what keeps a new folder syncing between
          devices. */
-      folders: state.folders.filter(f => {
-        /* Only fields count: nothing else can be on a shelf. */
-        const on = roots().filter(n => n.folderId === f.id);
-        return on.length ? on.some(n => priv.has(n.id) === wantPrivate) : !wantPrivate;
-      }),
+      /* Judged by everything beneath it, sub-folders included: a folder whose
+         only work is private is a label for private work wherever that work
+         actually sits. And a folder kept here whose parent was not must come
+         out to the top level, or the file would name a folder it does not
+         carry. */
+      folders: (() => {
+        const kept = state.folders.filter(f => {
+          const under = fieldsBeneathFolder(f.id);
+          return under.length ? under.some(n => priv.has(n.id) === wantPrivate) : !wantPrivate;
+        });
+        const keptIds = new Set(kept.map(f => f.id));
+        return kept.map(f => (f.parentId && !keptIds.has(f.parentId)
+          ? { ...f, parentId: null } : f));
+      })(),
       /* Applications only ever exist in the private half. */
       applications: wantPrivate ? state.applications : [],
     };
@@ -2212,7 +2300,9 @@ const Store = (() => {
     tagIndex, setTagMapping, nodeForTags,
     isPrivate, privateNodeIds,
     addLink, updateLink, deleteLink, linksFor, relatedTo, LINK_TYPES, prerequisiteWarnings,
-    folders, addFolder, renameFolder, deleteFolder, setNodeFolder, fieldGroups,
+    folders, folderById, addFolder, renameFolder, deleteFolder, setNodeFolder,
+    setFolderParent, folderWouldCycle, childFolders, folderAncestors, folderDepth,
+    fieldsOn, folderFieldCount, folderTree,
     addConnection, deleteConnection, connectionsFor, connectedInto,
     canConnect, connectableInto,
     get lastPrunedConnections() { return lastPruned; },

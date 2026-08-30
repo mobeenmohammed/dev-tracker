@@ -697,7 +697,8 @@ const Views = (() => {
         <select id="f-folder" name="folderId">
           <option value="">&mdash; no folder &mdash;</option>
           ${Store.folders().map(d =>
-            `<option value="${esc(d.id)}" ${d.id === (node.folderId || '') ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}
+            `<option value="${esc(d.id)}" ${d.id === (node.folderId || '') ? 'selected' : ''}>` +
+            `${'\u00a0\u00a0'.repeat(Store.folderDepth(d.id))}${esc(d.name)}</option>`).join('')}
         </select>
       </div>` : ''}
       <div class="field">

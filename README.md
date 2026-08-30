@@ -51,9 +51,9 @@ of the same panel.
 
 #### Folders
 
-Fields can be filed on **folders**, which live in the picker. A folder is a
-collapsible heading with the fields on it underneath, so twenty fields read as
-four groups rather than one long list.
+Fields can be filed on **folders**, and a folder can sit inside another, so a
+broad subject can be split into its parts: *Mathematics → Pure → Analysis*.
+Nesting goes as deep as you like.
 
 A folder is *not* a topic and never appears on a canvas. Making it one would
 turn the fields on it into its sub-topics, which is the one thing a field is
@@ -62,14 +62,16 @@ each field remembers which one it is filed on. Filing a field changes where you
 *find* it, never where it *sits*: its tree, its status, its progress and its
 tab are all exactly as they were.
 
-- **Make one** with *+ New folder* at the bottom of the picker; you name it in
-  the list, and the picker stays open so you can carry on.
+- **Make one** with *+ New folder* at the bottom of the picker, or **+** on a
+  folder's row to make one *inside* it. Either way you name it in the list,
+  where it is going to end up, and the picker stays open so you can carry on.
 - **File a field** on it from that field's **Details** panel, where everything
   else about where a topic sits is edited.
-- **Open a folder in the strip** by clicking its chip: its fields drop below it
-  in a panel, and you pick one from there — the same gesture the fields button
-  uses, and for the same reason. Arrow keys and Enter work in it, Escape or a
-  click anywhere closes it, and opening one panel puts the others away.
+- **Open a folder in the strip** by clicking its chip: what is inside it drops
+  below in a panel — sub-folders you can open in place, and the fields — and
+  you pick from there. Arrow keys, → and ← for the sub-folders, and Enter all
+  work in it; Escape or a click anywhere closes it, and opening one panel puts
+  the others away.
 - **In the picker**, a folder expands in place instead, since that list already
   runs downwards. Click it, or use → and ←; Enter on a folder opens it rather
   than jumping anywhere. A folder nobody has touched is open, so filing a field
@@ -77,22 +79,28 @@ tab are all exactly as they were.
   visits, and the folder holding the field you are on always opens.
 - **Searching opens folders**, because a closed one hiding the only match would
   look like no match at all.
-- **Rename** with the ✎ on a folder's row in the picker, or by double-clicking
-  it; **remove** it with the ×. Removing a folder never removes a field — they
-  come back to the top level.
+- **Rename or move** with the ✎ on a folder's row, or by double-clicking it:
+  one editor with the name and, beside it, the folder it sits inside. It will
+  not offer to move a folder into one of its own sub-folders.
+- **Remove** with the ×. Removing a folder never removes anything that was in
+  it: its fields and its sub-folders come out to wherever it was — the folder
+  above it, or the top level.
 
-In the tab strip a folder is **one chip however much is filed on it**, showing
-its name and its count. Its fields are not tabs of their own; they drop below
-the chip when you click it. That is what makes folders worth having on the bar:
-twenty fields in four folders take four slots, not twenty.
+In the tab strip only **top-level** folders get a chip, and a chip is one slot
+however much is inside it — its count is every field beneath it, sub-folders
+included. Nothing filed anywhere is a tab of its own. That is what makes
+folders worth having on the bar: twenty fields in four folders take four slots,
+not twenty, and nesting costs nothing more.
 
-The chip takes the underline when the field you are on is filed inside it,
-which is the only way to see where you are once its fields are off the bar.
-Fields on no folder stay ordinary tabs.
+The chip takes the underline when the field you are on is anywhere inside it,
+however deep, which is the only way to see where you are once its fields are
+off the bar. Fields on no folder stay ordinary tabs.
 
-A folder holding nothing but private fields is a label for private work, so its
-name stays out of the public snapshot. One with any public field on it, or one
-holding nothing at all, is published like anything else.
+A folder holding nothing but private work — anywhere beneath it, sub-folders
+included — is a label for private work, so its name stays out of the public
+snapshot. One with any public field beneath it, or one holding nothing at all,
+is published like anything else, and a folder kept when its parent was not
+comes out to the top level so the file never names a folder it does not carry.
 
 ### The tree, and the graph
 
@@ -563,8 +571,11 @@ folder it is filed on, which is only about where it is found:
 { "id": "math", "parentId": null, "name": "Mathematics", "folderId": "d3" }
 ```
 
+A folder is a name, and the folder it sits inside if it is not a top-level one:
+
 ```json
-{ "id": "d3", "name": "Sciences" }
+{ "id": "d3", "name": "Sciences", "parentId": null }
+{ "id": "d4", "name": "Physics",  "parentId": "d3" }
 ```
 
 Sessions reference a node by id:

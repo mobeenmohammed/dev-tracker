@@ -230,6 +230,14 @@ for (let i = 0; i < 30; i++) key(resizer, 'ArrowRight');
 check('it stops at a minimum',
       parseInt(window.getComputedStyle(doc.documentElement).getPropertyValue('--inspector-w'), 10) >= 280);
 check('cards show when last worked', $$('#nodes .card-when').length > 0);
+
+/* "Fresh" means worked on within a week, so asserting it against the seed's
+   own dates makes the suite fail on a calendar rather than on a change — it
+   did, eight days after the newest seeded session. The work is logged here
+   and taken away again, so the check is about the rule and not about how long
+   ago the seed was written. */
+const freshSession = Store.addSession({ nodeId: 'hpc-openmp', date: Store.todayISO(), minutes: 20 });
+Tree.render();
 check('recent work highlighted on cards', $$('#nodes .card-when.is-fresh').length > 0);
 click($('#activityBtn'));
 check('activity toggle hides card dates', $$('#nodes .card-when').length === 0);
@@ -349,6 +357,8 @@ check('every topic listed', $$('#view-list .list-row').length === Store.state.no
 check('grouped by field', $$('#view-list .list-domain').length === 5);
 check('rows show when last worked', $$('#view-list .when').some(w => /ago|today|yesterday/.test(w.textContent)));
 check('recent work highlighted', $$('#view-list .when.is-fresh').length > 0);
+Store.deleteSession(freshSession.id);
+window.Views.renderList();
 
 // selecting a row must NOT jump to the tree
 const rowFor = id => $$('#view-list .list-row').find(r => r.querySelector(`[data-status-for="${id}"]`));
@@ -1396,16 +1406,16 @@ check('it says how many are on it',
 check('its fields are shown from the start',
       rowNames().includes('High Performance Computing'), rowNames().join(' | '));
 check('they are drawn as belonging to it',
-      pickerRow('.picker-row.is-shelved').length === 2,
-      `${pickerRow('.picker-row.is-shelved').length}`);
+      pickerRow('.picker-row.is-nested').length === 2,
+      `${pickerRow('.picker-row.is-nested').length}`);
 check('and the caret says it is open',
       $('#fieldPickerList .picker-folder').classList.contains('is-expanded'));
 check('the loose fields are there too', rowNames().includes('C++'), rowNames().join(' | '));
 
 /* folding it away hides them */
 click($('#fieldPickerList .picker-folder'));
-check('folding it hides its fields', pickerRow('.picker-row.is-shelved').length === 0,
-      `${pickerRow('.picker-row.is-shelved').length} still shown`);
+check('folding it hides its fields', pickerRow('.picker-row.is-nested').length === 0,
+      `${pickerRow('.picker-row.is-nested').length} still shown`);
 check('but the folder itself stays', rowNames().includes('Number Shelf'), rowNames().join(' | '));
 
 check('but the strip is unaffected: a folder is one chip there either way',
@@ -1414,11 +1424,11 @@ check('but the strip is unaffected: a folder is one chip there either way',
 
 click($('#fieldPickerList .picker-folder'));
 check('unfolding brings them back in the picker',
-      pickerRow('.picker-row.is-shelved').length === 2,
-      `${pickerRow('.picker-row.is-shelved').length} in the picker`);
+      pickerRow('.picker-row.is-nested').length === 2,
+      `${pickerRow('.picker-row.is-nested').length} in the picker`);
 
 /* and they open like any other field */
-const shelved = pickerRow('.picker-row.is-shelved').find(r => r.dataset.field === 'hpc');
+const shelved = pickerRow('.picker-row.is-nested').find(r => r.dataset.field === 'hpc');
 click(shelved);
 check('a field opens from inside a folder', Tree.rootId === 'hpc', String(Tree.rootId));
 check('the picker closed behind it', $('#fieldPicker').hidden);
@@ -1438,15 +1448,15 @@ fire(box, 'input');
 /* keyboard: right opens, left closes, Enter toggles */
 pickerRow('.picker-folder')[0].dispatchEvent(new window.MouseEvent('mousemove', { bubbles: true }));
 key(box, 'ArrowRight');
-check('right opens a folder', pickerRow('.picker-row.is-shelved').length === 2,
-      `${pickerRow('.picker-row.is-shelved').length}`);
+check('right opens a folder', pickerRow('.picker-row.is-nested').length === 2,
+      `${pickerRow('.picker-row.is-nested').length}`);
 key(box, 'ArrowLeft');
-check('left closes it', pickerRow('.picker-row.is-shelved').length === 0,
-      `${pickerRow('.picker-row.is-shelved').length}`);
+check('left closes it', pickerRow('.picker-row.is-nested').length === 0,
+      `${pickerRow('.picker-row.is-nested').length}`);
 key(box, 'Enter');
 check('Enter on a folder opens it rather than jumping anywhere',
-      pickerRow('.picker-row.is-shelved').length === 2 && !$('#fieldPicker').hidden,
-      `${pickerRow('.picker-row.is-shelved').length} shelved, hidden=${$('#fieldPicker').hidden}`);
+      pickerRow('.picker-row.is-nested').length === 2 && !$('#fieldPicker').hidden,
+      `${pickerRow('.picker-row.is-nested').length} shelved, hidden=${$('#fieldPicker').hidden}`);
 
 /* a new folder is named in the list, so the picker stays open for it */
 click($('#fieldPickerNewFolder'));
@@ -1596,7 +1606,7 @@ check('a panel for a folder that no longer exists is put away', $('#folderMenu')
    then surprise you once the box was cleared. */
 click($('#fieldPickerBtn'));
 const searchable = Store.folders()[0];
-const openBefore = $$('#fieldPickerList .picker-row.is-shelved').length;
+const openBefore = $$('#fieldPickerList .picker-row.is-nested').length;
 const pbox = $('#fieldPickerSearch');
 pbox.value = 'Field';
 fire(pbox, 'input');
@@ -1605,8 +1615,8 @@ if (headerWhileSearching) click(headerWhileSearching);
 pbox.value = '';
 fire(pbox, 'input');
 check('folding while searching is not done behind your back',
-      $$('#fieldPickerList .picker-row.is-shelved').length === openBefore,
-      `${$$('#fieldPickerList .picker-row.is-shelved').length} vs ${openBefore}`);
+      $$('#fieldPickerList .picker-row.is-nested').length === openBefore,
+      `${$$('#fieldPickerList .picker-row.is-nested').length} vs ${openBefore}`);
 click(doc.body);
 
 /* ---------- 17. what the second review turned up ---------- */
@@ -1666,6 +1676,111 @@ click(doc.body);
 check('deleting it takes it out of the open Details panel',
       !$('#f-folder') || ![...$('#f-folder').options].some(o => o.value === named.id),
       $('#f-folder') ? [...$('#f-folder').options].map(o => o.value).join(',') : 'no select');
+
+/* ---------- 18. sub-folders ---------- */
+
+const outer = Store.addFolder('Broad Subject');
+const inner = Store.addFolder('One Part', outer.id);
+Store.setNodeFolder('math', inner.id);
+Store.setNodeFolder('hpc', outer.id);
+click(tabNamed('All'));
+
+const chipFor = id => $(`#fieldTabsScroll .tab[data-folder="${id}"]`);
+const menuRows = () => $$('#folderMenu .picker-row');
+const namesIn = els => els.map(r => r.querySelector('.picker-name').textContent);
+
+/* Only the outermost folder is a chip; what is inside it is inside its panel. */
+check('a sub-folder gets no chip of its own', !chipFor(inner.id));
+check('the outer folder does', !!chipFor(outer.id));
+check('and it counts everything beneath it, however deep',
+      chipFor(outer.id).querySelector('.tab-pct').textContent === '2',
+      chipFor(outer.id).querySelector('.tab-pct').textContent);
+
+/* Its panel nests: the sub-folder is a row you can open, with the fields on
+   the outer folder alongside it. */
+click(chipFor(outer.id));
+check('the panel lists the sub-folder',
+      namesIn(menuRows()).includes('One Part'), namesIn(menuRows()).join(' | '));
+check('and the fields filed directly on the outer one',
+      namesIn(menuRows()).includes('High Performance Computing'), namesIn(menuRows()).join(' | '));
+const innerRow = () => menuRows().find(r => r.dataset.folder === inner.id);
+check('the sub-folder is drawn as a folder', !!innerRow());
+check('what is inside it is indented',
+      $$('#folderMenu .picker-row.is-nested').length >= 1,
+      `${$$('#folderMenu .picker-row.is-nested').length} nested rows`);
+check('and its field is reachable from there',
+      namesIn(menuRows()).includes('Mathematics'), namesIn(menuRows()).join(' | '));
+
+/* Collapsing the sub-folder hides its field but not the folder. */
+click(innerRow());
+check('collapsing the sub-folder hides what is in it',
+      !namesIn(menuRows()).includes('Mathematics'), namesIn(menuRows()).join(' | '));
+check('but the sub-folder is still there', !!innerRow());
+click(innerRow());
+check('and opening it brings the field back',
+      namesIn(menuRows()).includes('Mathematics'), namesIn(menuRows()).join(' | '));
+
+/* Choosing a field from inside a sub-folder opens it, and the outer chip
+   carries the underline even though the field is two levels down. */
+click(menuRows().find(r => r.dataset.field === 'math'));
+check('a field deep inside a folder opens', Tree.rootId === 'math', String(Tree.rootId));
+check('and the panel closed', $('#folderMenu').hidden);
+check('the outermost chip shows where you are',
+      chipFor(outer.id).classList.contains('is-active'));
+
+/* The picker nests the same way. */
+click($('#fieldPickerBtn'));
+const pickerNames = () => $$('#fieldPickerList .picker-row').map(r => r.querySelector('.picker-name').textContent);
+check('the picker shows the outer folder', pickerNames().includes('Broad Subject'));
+check('and the sub-folder inside it', pickerNames().includes('One Part'));
+check('the sub-folder is drawn deeper than its parent',
+      (() => {
+        const rows = $$('#fieldPickerList .picker-row');
+        const o = rows.find(r => r.dataset.folder === outer.id);
+        const i = rows.find(r => r.dataset.folder === inner.id);
+        return parseInt(i.style.paddingLeft || '0', 10) > parseInt(o.style.paddingLeft || '0', 10);
+      })(), 'the sub-folder is not indented past its parent');
+
+/* A sub-folder is made from the folder it goes inside. */
+const outerRow = () => $$('#fieldPickerList .picker-row').find(r => r.dataset.folder === outer.id);
+check('a folder offers to make one inside it', !!outerRow().querySelector('.picker-add'));
+click(outerRow().querySelector('.picker-add'));
+check('naming it happens in the list', !!$('#fieldPickerList .picker-rename'));
+const subBox = $('#fieldPickerList .picker-rename');
+subBox.value = 'Another Part';
+key(subBox, 'Enter');
+const made = Store.folders().find(f => f.name === 'Another Part');
+check('the sub-folder is made', !!made);
+check('and it is made inside the folder it was started from',
+      made && made.parentId === outer.id, made && made.parentId);
+
+/* Renaming and moving are the same control. */
+click(outerRow().querySelector('.picker-edit'));
+check('the editor offers a name', !!$('#fieldPickerList .picker-rename'));
+check('and somewhere to move it to', !!$('#fieldPickerList .picker-move'));
+check('it never offers to move a folder inside its own sub-folder',
+      ![...$('#fieldPickerList .picker-move').options].some(o => o.value === inner.id),
+      [...$('#fieldPickerList .picker-move').options].map(o => o.value).join(','));
+const moveTo = $('#fieldPickerList .picker-move');
+const nameIn = $('#fieldPickerList .picker-rename');
+nameIn.value = 'Broad Subject';
+key(nameIn, 'Enter');
+
+/* Removing an outer folder brings what was inside it out, not down. */
+const beforeRemoval = Store.roots().length;
+click($$('#fieldPickerList .picker-row').find(r => r.dataset.folder === outer.id).querySelector('.picker-del'));
+check('removing it keeps every field', Store.roots().length === beforeRemoval);
+check('and its sub-folder comes out to the top level',
+      Store.folderById(inner.id).parentId === null,
+      String(Store.folderById(inner.id).parentId));
+check('the field inside the sub-folder never moved',
+      Store.byId('math').folderId === inner.id, String(Store.byId('math').folderId));
+check('and the sub-folder now has a chip of its own',
+      !!chipFor(inner.id));
+click(doc.body);
+Store.deleteFolder(inner.id);
+Store.folders().slice().forEach(f => Store.deleteFolder(f.id));
+click(tabNamed('All'));
 
 if (errors.length) {
   console.log('--- runtime errors ---');

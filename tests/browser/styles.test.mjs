@@ -99,8 +99,10 @@ check('and the same in the strip',
         doc.querySelector('#fieldTabsScroll').appendChild(chip);
         return window.getComputedStyle(chip).textTransform !== 'uppercase';
       })(), 'the folder chip is still uppercased');
-check('and the fields on it are indented under it',
-      /\.picker-row\.is-shelved\s*\{[^}]*padding-left/.test(css));
+/* Nesting has no depth limit, so the indent is a per-row inline style and
+   only the rail that marks a nested row lives in the stylesheet. */
+check('and what is inside a folder is marked as nested',
+      /\.picker-row\.is-nested::before\s*\{[^}]*border-left/.test(css));
 check('the indent rail can be positioned against the row',
       probeRow('picker-row').position === 'relative');
 

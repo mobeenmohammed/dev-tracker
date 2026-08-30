@@ -1126,11 +1126,11 @@ check('the field has not moved in the tree', Store.byId('analysis').parentId, nu
 check('it is still a field',             Store.roots().map(r => r.id), ['analysis', 'pure', 'cpp']);
 check('and still has its own branch',    Store.childrenOf('analysis').map(n => n.id), ['seq']);
 
-const grouped = Store.fieldGroups();
+const grouped = Store.folderTree();
 check('the folder knows what is on it',
       grouped.folders.map(g => [g.folder.name, g.fields.map(f => f.id)]),
       [['Mathematics', ['analysis', 'pure']]]);
-check('and the rest are loose',          grouped.loose.map(f => f.id), ['cpp']);
+check('and the rest are loose',          grouped.fields.map(f => f.id), ['cpp']);
 
 /* a folder is for fields; a sub-topic already has a place */
 check('a sub-topic cannot be filed',     Store.setNodeFolder('seq', maths.id), null);
@@ -1142,7 +1142,7 @@ check('a field on a shelf', Store.byId('pure').folderId, maths.id);
 Store.updateNode('pure', { parentId: 'analysis' });
 check('moving it under another topic takes it off',  Store.byId('pure').folderId, null);
 check('and the folder no longer counts it',
-      Store.fieldGroups().folders[0].fields.map(f => f.id), ['analysis']);
+      Store.folderTree().folders[0].fields.map(f => f.id), ['analysis']);
 Store.updateNode('pure', { parentId: null });
 check('bringing it back does not put it back on a shelf', Store.byId('pure').folderId, null);
 Store.setNodeFolder('pure', maths.id);
@@ -1190,6 +1190,114 @@ const twiceOver = Store.toPrivateJSON();
 Store.mergeJSON(twiceOver);
 Store.mergeJSON(twiceOver);
 check('merging is idempotent for folders', Store.folders().length, 3);
+
+/* --- sub-folders: a folder inside a folder --- */
+
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'analysis', parentId: null, name: 'Analysis' },
+    { id: 'pure',     parentId: null, name: 'Pure Maths' },
+    { id: 'stats',    parentId: null, name: 'Statistics' },
+    { id: 'cpp',      parentId: null, name: 'C++' },
+  ],
+}));
+const mathsF = Store.addFolder('Mathematics');
+const pureF  = Store.addFolder('Pure', mathsF.id);
+const appF   = Store.addFolder('Applied', mathsF.id);
+
+check('a folder can be made inside another', Store.folderById(pureF.id).parentId, mathsF.id);
+check('the top level holds only the outer one',
+      Store.childFolders(null).map(f => f.name), ['Mathematics']);
+check('and the outer one holds the two inside it',
+      Store.childFolders(mathsF.id).map(f => f.name), ['Pure', 'Applied']);
+check('depth is how far in it sits', [Store.folderDepth(mathsF.id), Store.folderDepth(pureF.id)], [0, 1]);
+check('and the chain reads outwards',
+      Store.folderAncestors(pureF.id).map(f => f.name), ['Mathematics']);
+
+Store.setNodeFolder('analysis', pureF.id);
+Store.setNodeFolder('pure', pureF.id);
+Store.setNodeFolder('stats', appF.id);
+
+check('fields file onto a sub-folder',  Store.fieldsOn(pureF.id).map(f => f.id), ['analysis', 'pure']);
+check('nothing is filed on the outer one directly', Store.fieldsOn(mathsF.id).length, 0);
+check('but it counts everything beneath it', Store.folderFieldCount(mathsF.id), 3);
+check('and a sub-folder counts its own',    Store.folderFieldCount(pureF.id), 2);
+check('the loose fields are still loose',   Store.fieldsOn(null).map(f => f.id), ['cpp']);
+
+const tree = Store.folderTree(null);
+check('the tree nests', tree.folders.map(g => [g.folder.name, g.folders.map(x => x.folder.name)]),
+      [['Mathematics', ['Pure', 'Applied']]]);
+check('and carries the counts', tree.folders[0].count, 3);
+check('with the loose fields at the top', tree.fields.map(f => f.id), ['cpp']);
+
+/* a folder cannot contain itself, however far round the loop */
+check('a folder cannot go inside itself',      Store.setFolderParent(mathsF.id, mathsF.id), null);
+check('nor inside one of its own sub-folders', Store.setFolderParent(mathsF.id, pureF.id), null);
+check('nor inside one that is not there',      Store.setFolderParent(mathsF.id, 'ghost'), null);
+check('but it can move somewhere legitimate',
+      !!Store.setFolderParent(appF.id, pureF.id), true);
+check('and the counts follow it',
+      [Store.folderFieldCount(pureF.id), Store.folderFieldCount(mathsF.id)], [3, 3]);
+Store.setFolderParent(appF.id, mathsF.id);
+
+/* removing a folder must never destroy what was inside it */
+check('removing the outer folder frees its fields', Store.deleteFolder(mathsF.id), 0);
+check('its sub-folders come out to where it was',
+      Store.childFolders(null).map(f => f.name), ['Pure', 'Applied']);
+check('and every field is still filed on them',
+      [Store.fieldsOn(pureF.id).length, Store.fieldsOn(appF.id).length], [2, 1]);
+check('nothing was lost', Store.roots().length, 4);
+
+check('removing an inner folder brings its fields up to the one above it',
+      (Store.setFolderParent(appF.id, pureF.id), Store.deleteFolder(appF.id)), 1);
+check('the field moved up rather than out', Store.byId('stats').folderId, pureF.id);
+
+/* a file with a loop in it loads as a tree missing that link */
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'n', parentId: null, name: 'N', folderId: 'a' }],
+  folders: [
+    { id: 'a', name: 'A', parentId: 'b' },
+    { id: 'b', name: 'B', parentId: 'a' },
+    { id: 'c', name: 'C', parentId: 'nowhere' },
+  ],
+}));
+check('a loop between folders is broken rather than kept',
+      Store.folders().filter(f => f.parentId === null).length > 0, true);
+check('every folder can be walked to the top without hanging',
+      Store.folders().every(f => Store.folderDepth(f.id) < Store.folders().length), true);
+check('a folder inside one that is missing comes to the top',
+      Store.folderById('c').parentId, null);
+
+/* privacy is judged by everything beneath, however deep */
+Store.importJSON(JSON.stringify({
+  nodes: [
+    { id: 'shown',  parentId: null, name: 'Shown',  folderId: 'inner' },
+    { id: 'hidden', parentId: null, name: 'Hidden', folderId: 'secret', private: true },
+  ],
+  folders: [
+    { id: 'outer',  name: 'Outer' },
+    { id: 'inner',  name: 'Inner',  parentId: 'outer' },
+    { id: 'quiet',  name: 'Quiet' },
+    { id: 'secret', name: 'Secret', parentId: 'quiet' },
+  ],
+}));
+check('an outer folder is published for work deep inside it',
+      JSON.parse(Store.toJSON()).folders.map(f => f.id).sort(), ['inner', 'outer']);
+check('and one whose only work is private is not named at all',
+      /Quiet|Secret/.test(Store.toJSON()), false);
+check('the private file keeps that side',
+      JSON.parse(Store.toPrivateJSON()).folders.map(f => f.id).sort(), ['quiet', 'secret']);
+
+Store.importJSON(JSON.stringify({
+  nodes: [{ id: 'pub', parentId: null, name: 'Pub', folderId: 'kid' }],
+  folders: [{ id: 'hush', name: 'Hush' }, { id: 'kid', name: 'Kid', parentId: 'hush' }],
+}));
+/* Hush holds nothing itself and Kid holds public work, so Kid is published —
+   but it must not point at a parent the file does not carry. */
+const publishedFolders = JSON.parse(Store.toJSON()).folders;
+check('a kept folder never names a parent that was not kept',
+      publishedFolders.every(f => !f.parentId || publishedFolders.some(p => p.id === f.parentId)),
+      true);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

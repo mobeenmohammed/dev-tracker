@@ -806,16 +806,28 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 }
 .picker-folder.is-expanded .picker-caret { color: var(--accent); }
 
-.picker-row.is-shelved { padding-left: 24px; }
-.picker-row.is-shelved::before {
+/* Nesting has no depth limit, so the indent is set per row in script and the
+   rail is drawn against the row's own left edge. */
+.picker-row { position: relative; }
+.picker-row.is-nested::before {
   content: '';
   position: absolute;
   left: 13px;
   top: 0; bottom: 0;
   border-left: 1px solid var(--border);
 }
-.picker-row { position: relative; }
 
+/* Renaming and moving share one editor, so it has to fit a name and a list on
+   one row without either being squeezed out. */
+.picker-editor { display: flex; gap: 4px; flex: 1; min-width: 0; }
+.picker-move {
+  flex: 0 1 40%;
+  min-width: 0;
+  padding: 2px 4px;
+  font-size: 11.5px;
+}
+
+.picker-add,
 .picker-edit,
 .picker-del {
   flex: none;
@@ -827,11 +839,15 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   opacity: 0;
   transition: opacity .12s, color .12s;
 }
+.picker-folder:hover .picker-add,
+.picker-folder.is-cursor .picker-add,
 .picker-folder:hover .picker-edit,
 .picker-folder.is-cursor .picker-edit,
 .picker-folder:hover .picker-del,
 .picker-folder.is-cursor .picker-del { opacity: 1; }
 .picker-edit { font-size: 10px; }
+.picker-add { font-size: 13px; }
+.picker-add:hover,
 .picker-edit:hover { color: var(--accent); background: var(--bg-elev-2); }
 .picker-del:hover { color: var(--danger); background: var(--bg-elev-2); }
 

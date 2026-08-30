@@ -264,10 +264,13 @@
        fields button uses, for the same reason. It carries the underline when
        the field you are on is filed on it, so you can still see where you are
        without its fields being on screen. */
-    const folderTab = (folder, fields) => {
-      const holdsActive = currentView === 'tree' && !!activeField
-        && fields.some(f => f.id === activeField);
-      const here = holdsActive && Store.byId(activeField);
+    const folderTab = (folder, count) => {
+      /* The underline follows the field you are on however deep inside the
+         folder it sits, or a sub-folder would swallow the only sign of it. */
+      const here = currentView === 'tree' && activeField && Store.byId(activeField);
+      const holdsActive = !!here && !!here.folderId
+        && (here.folderId === folder.id
+            || Store.folderAncestors(here.folderId).some(f => f.id === folder.id));
 
       const btn = document.createElement('button');
       btn.className = 'tab tab-folder' + (holdsActive ? ' is-active' : '');
@@ -278,11 +281,12 @@
       btn.innerHTML =
         `<span class="tab-folder-icon">&#128193;</span>` +
         `<span>${escapeHtml(folder.name)}</span>` +
-        `<span class="tab-pct">${fields.length}</span>` +
+        `<span class="tab-pct">${count}</span>` +
         `<span class="tab-caret">&#8964;</span>`;
-      btn.title = here
-        ? `${folder.name} — ${fields.length === 1 ? '1 field' : fields.length + ' fields'}, showing ${here.name}`
-        : `${folder.name} — ${fields.length === 1 ? '1 field' : fields.length + ' fields'}`;
+      const holding = count === 1 ? '1 field' : count + ' fields';
+      btn.title = holdsActive
+        ? `${folder.name} — ${holding}, showing ${here.name}`
+        : `${folder.name} — ${holding}`;
 
       btn.addEventListener('click', ev => {
         ev.stopPropagation();
@@ -307,9 +311,9 @@
        below it when it is opened rather than unrolling along the strip. That
        is what makes folders worth having here: twenty fields in four folders
        take four slots, not twenty. Loose fields are still tabs of their own. */
-    const groups = Store.fieldGroups();
-    groups.folders.forEach(({ folder, fields }) => strip.appendChild(folderTab(folder, fields)));
-    groups.loose.forEach(field => strip.appendChild(tab(field.name, { fieldId: field.id })));
+    const top = Store.folderTree(null);
+    top.folders.forEach(({ folder, count }) => strip.appendChild(folderTab(folder, count)));
+    top.fields.forEach(field => strip.appendChild(tab(field.name, { fieldId: field.id })));
 
     const fields = Store.roots();
 
@@ -375,10 +379,17 @@
     hideDataMenu();
 
     openFolderMenu = folder.id;
-    const fields = Store.fieldGroups().folders
-      .find(g => g.folder.id === folder.id);
-    folderMenuIndex = Math.max(0, (fields ? fields.fields : [])
-      .findIndex(f => f.id === activeField));
+    /* The sub-folder holding the field you are on is opened, or it would not
+       be in the list to start the cursor on. */
+    if (activeField) {
+      const field = Store.byId(activeField);
+      if (field && field.folderId) {
+        shutFolders.delete(field.folderId);
+        Store.folderAncestors(field.folderId).forEach(f => shutFolders.delete(f.id));
+      }
+    }
+    folderMenuIndex = Math.max(0, folderMenuRows()
+      .findIndex(r => r.kind === 'field' && r.id === activeField));
 
     renderFolderMenu();
     menu.hidden = false;
@@ -394,15 +405,20 @@
     menu.style.width = width + 'px';
   }
 
+  /* What a chip's panel shows: everything inside that one folder, nested the
+     same way the picker nests it. */
+  const folderMenuRows = () => folderRows(openFolderMenu, 0, '');
+
   function renderFolderMenu() {
     const menu = document.getElementById('folderMenu');
-    const group = Store.fieldGroups().folders.find(g => g.folder.id === openFolderMenu);
-    if (!group) { closeFolderMenu(); return; }
+    const folder = Store.folderById(openFolderMenu);
+    if (!folder) { closeFolderMenu(); return; }
 
+    const rows = folderMenuRows();
     menu.replaceChildren();
-    menu.setAttribute('aria-label', group.folder.name);
+    menu.setAttribute('aria-label', folder.name);
 
-    if (!group.fields.length) {
+    if (!rows.length) {
       const empty = document.createElement('p');
       empty.className = 'muted picker-empty';
       empty.textContent = 'Nothing filed here yet. A field is filed from its Details panel.';
@@ -410,36 +426,19 @@
       return;
     }
 
-    folderMenuIndex = Math.max(0, Math.min(folderMenuIndex, group.fields.length - 1));
+    folderMenuIndex = Math.max(0, Math.min(folderMenuIndex, rows.length - 1));
 
-    group.fields.forEach((field, i) => {
-      const row = document.createElement('button');
-      row.className = 'picker-row';
-      row.setAttribute('role', 'option');
-      row.dataset.field = field.id;
-      if (i === folderMenuIndex) row.classList.add('is-cursor');
-
-      const open = currentView === 'tree' && field.id === activeField;
-      row.classList.toggle('is-open', open);
-      row.setAttribute('aria-selected', String(open));
-      row.innerHTML =
-        '<span class="dot" style="background:var(' + Store.STATUS_BY_ID[field.status].cssVar + ')"></span>' +
-        '<span class="picker-name">' + escapeHtml(field.name) + '</span>' +
-        '<span class="picker-meta">' + Store.descendantsOf(field.id).length + ' topics</span>' +
-        '<span class="picker-pct">' + Math.round(Store.progressOf(field.id) * 100) + '%</span>';
-
-      row.addEventListener('click', ev => {
-        ev.stopPropagation();
-        closeFolderMenu();
-        openField(field.id);
-      });
-      row.addEventListener('mousemove', () => {
+    rows.forEach((entry, i) => menu.appendChild(entryRow(entry, {
+      cursor:  i === folderMenuIndex,
+      manage:  false,
+      onHover: () => {
         if (folderMenuIndex === i) return;
         folderMenuIndex = i;
         [...menu.children].forEach((el, j) => el.classList.toggle('is-cursor', j === i));
-      });
-      menu.appendChild(row);
-    });
+      },
+      onFolder: id => { toggleFolder(id); folderMenuIndex = i; renderFolderMenu(); },
+      onField:  id => { closeFolderMenu(); openField(id); },
+    })));
 
     /* The panel scrolls once a folder holds more than fits, so arrowing down
        has to bring the cursor with it or Enter opens something unseen. */
@@ -471,24 +470,31 @@
         return;
       }
 
-      const group = Store.fieldGroups().folders.find(g => g.folder.id === openFolderMenu);
-      const fields = group ? group.fields : [];
+      const rows = folderMenuRows();
+      const entry = rows[folderMenuIndex];
 
       if (ev.key === 'Escape') {
         ev.preventDefault(); ev.stopPropagation();
         closeFolderMenu();
       } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
-        if (!fields.length) return;
+        if (!rows.length) return;
         ev.preventDefault(); ev.stopPropagation();
-        folderMenuIndex = (folderMenuIndex + (ev.key === 'ArrowDown' ? 1 : fields.length - 1))
-          % fields.length;
+        folderMenuIndex = (folderMenuIndex + (ev.key === 'ArrowDown' ? 1 : rows.length - 1))
+          % rows.length;
+        renderFolderMenu();
+      } else if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') {
+        /* The same disclosure gesture the picker uses, on the sub-folders. */
+        if (!entry || entry.kind !== 'folder') return;
+        if (entry.open === (ev.key === 'ArrowRight')) return;
+        ev.preventDefault(); ev.stopPropagation();
+        toggleFolder(entry.id);
         renderFolderMenu();
       } else if (ev.key === 'Enter') {
-        const field = fields[folderMenuIndex];
-        if (!field) return;
+        if (!entry) return;
         ev.preventDefault(); ev.stopPropagation();
+        if (entry.kind === 'folder') { toggleFolder(entry.id); renderFolderMenu(); return; }
         closeFolderMenu();
-        openField(field.id);
+        openField(entry.id);
       }
     }, true);
   }
@@ -508,38 +514,46 @@
   let shutFolders = new Set();
   const folderOpen = id => !shutFolders.has(id);
 
-  /* One flat list of what is actually on screen: All, then each folder header
-     followed by its fields when it is open, then the fields on no folder.
-     Flattening it here is what lets the keyboard walk it without knowing
-     anything about the nesting. */
+  /* One flat list of what is actually on screen: a folder, then what is inside
+     it when it is open — sub-folders first, each with their own contents, then
+     the fields filed on it. Flattening the nesting here is what lets the
+     keyboard walk it without knowing anything about the shape, and what lets
+     the picker and a single folder's panel share every row.
+
+     Each row carries its depth, which is the only thing the drawing needs to
+     know about how deep it sits. */
+  function folderRows(parentId, depth, q) {
+    const rows = [];
+    const hit = name => !q || name.toLowerCase().includes(q);
+    const tree = Store.folderTree(parentId);
+
+    tree.folders.forEach(({ folder, count }) => {
+      /* A folder whose own name matches shows everything inside it; otherwise
+         it shows only what matched, and drops out if nothing did. A search
+         opens folders, because a closed one hiding the only hit would look
+         like no hit at all. */
+      const named = q && hit(folder.name);
+      const inside = folderRows(folder.id, depth + 1, named ? '' : q);
+      if (q && !named && !inside.length) return;
+
+      const open = q ? true : folderOpen(folder.id);
+      rows.push({ kind: 'folder', id: folder.id, name: folder.name, count, open, depth });
+      if (open) rows.push(...inside);
+    });
+
+    tree.fields.filter(f => hit(f.name)).forEach(f =>
+      rows.push({ kind: 'field', id: f.id, name: f.name, status: f.status, depth }));
+
+    return rows;
+  }
+
   function pickerRows() {
     const box = document.getElementById('fieldPickerSearch');
     const q = (box.value || '').trim().toLowerCase();
-    const hit = field => !q || field.name.toLowerCase().includes(q);
 
     const rows = [];
-    if (hit({ name: 'All' })) rows.push({ kind: 'all', id: null, name: 'All' });
-
-    const { folders, loose } = Store.fieldGroups();
-    folders.forEach(({ folder, fields }) => {
-      const matches = fields.filter(hit);
-      /* A folder whose own name matches shows everything on it; otherwise it
-         shows what matched. Searching opens folders, because a closed one
-         hiding the only hit would look like no hit at all. */
-      const named = q && folder.name.toLowerCase().includes(q);
-      const shown = named ? fields : matches;
-      if (q && !named && !matches.length) return;
-
-      const open = q ? true : folderOpen(folder.id);
-      rows.push({ kind: 'folder', id: folder.id, name: folder.name,
-                  count: fields.length, open });
-      if (open) shown.forEach(f => rows.push({ kind: 'field', id: f.id, name: f.name,
-                                               status: f.status, inFolder: true }));
-    });
-
-    loose.filter(hit).forEach(f => rows.push({ kind: 'field', id: f.id, name: f.name,
-                                               status: f.status, inFolder: false }));
-    return rows;
+    if (!q || 'all'.includes(q)) rows.push({ kind: 'all', id: null, name: 'All', depth: 0 });
+    return rows.concat(folderRows(null, 0, q));
   }
 
   function toggleFolder(id) {
@@ -550,6 +564,80 @@
     if (shutFolders.has(id)) shutFolders.delete(id); else shutFolders.add(id);
     persistUi();
     renderPickerList();
+  }
+
+  /* One row, drawn the same way wherever it appears: the picker and a chip's
+     panel show the same nesting, so they share the drawing and differ only in
+     whether the folder controls are on offer. `manage` is what the picker has
+     and the panel does not — the panel is for going somewhere, not for
+     rearranging. */
+  function entryRow(entry, { cursor, manage, onHover, onFolder, onField }) {
+    const row = document.createElement('button');
+    row.className = 'picker-row picker-' + entry.kind;
+    row.setAttribute('role', 'option');
+    row.dataset.field = entry.kind === 'field' ? entry.id : '';
+    if (entry.kind === 'folder') row.dataset.folder = entry.id;
+    if (entry.depth) row.classList.add('is-nested');
+    if (cursor) row.classList.add('is-cursor');
+    /* Indent is set here rather than by a class per level, because the nesting
+       has no depth limit. */
+    if (entry.depth) row.style.paddingLeft = (8 + entry.depth * 15) + 'px';
+
+    const isOpen = entry.kind !== 'folder'
+      && currentView === 'tree' && (entry.id || null) === activeField;
+    row.classList.toggle('is-open', isOpen);
+    row.setAttribute('aria-selected', String(isOpen));
+
+    if (entry.kind === 'all') {
+      row.innerHTML = '<span class="glyph">&#9678;</span><span class="picker-name">All</span>' +
+        '<span class="picker-meta">' + Store.roots().length + ' fields</span>';
+    } else if (entry.kind === 'folder') {
+      row.classList.toggle('is-expanded', entry.open);
+      row.setAttribute('aria-expanded', String(entry.open));
+      row.innerHTML =
+        '<span class="picker-caret">' + (entry.open ? '&#9662;' : '&#9656;') + '</span>' +
+        '<span class="picker-name">' + escapeHtml(entry.name) + '</span>' +
+        '<span class="picker-meta">' +
+          (entry.count === 1 ? '1 field' : entry.count + ' fields') + '</span>' +
+        (manage
+          ? '<span class="picker-add" role="button" tabindex="-1" ' +
+              'title="New folder inside this one">+</span>' +
+            '<span class="picker-edit" role="button" tabindex="-1" ' +
+              'title="Rename or move this folder">\u270E</span>' +
+            '<span class="picker-del" role="button" tabindex="-1" ' +
+              'title="Remove this folder — what is in it stays">&times;</span>'
+          : '');
+      row.title = 'Show or hide what is in ' + entry.name;
+
+      if (manage) {
+        row.querySelector('.picker-add').addEventListener('click', ev => {
+          ev.stopPropagation();
+          startNewFolder(entry.id);
+        });
+        row.querySelector('.picker-edit').addEventListener('click', ev => {
+          ev.stopPropagation();
+          editFolderInline(row, entry);
+        });
+        row.querySelector('.picker-del').addEventListener('click', ev => {
+          ev.stopPropagation();
+          removeFolder(entry);
+        });
+      }
+    } else {
+      row.innerHTML =
+        '<span class="dot" style="background:var(' + Store.STATUS_BY_ID[entry.status].cssVar + ')"></span>' +
+        '<span class="picker-name">' + escapeHtml(entry.name) + '</span>' +
+        '<span class="picker-meta">' + Store.descendantsOf(entry.id).length + ' topics</span>' +
+        '<span class="picker-pct">' + Math.round(Store.progressOf(entry.id) * 100) + '%</span>';
+    }
+
+    row.addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (entry.kind === 'folder') onFolder(entry.id);
+      else onField(entry.id);
+    });
+    row.addEventListener('mousemove', onHover);
+    return row;
   }
 
   function renderPickerList() {
@@ -567,76 +655,17 @@
 
     pickerIndex = Math.max(0, Math.min(pickerIndex, rows.length - 1));
 
-    rows.forEach((entry, i) => {
-      const row = document.createElement('button');
-      row.className = 'picker-row picker-' + entry.kind;
-      row.setAttribute('role', 'option');
-      row.dataset.field = entry.kind === 'field' ? entry.id : '';
-      if (entry.kind === 'folder') row.dataset.folder = entry.id;
-      if (entry.inFolder) row.classList.add('is-shelved');
-      if (i === pickerIndex) row.classList.add('is-cursor');
-
-      const isOpen = entry.kind !== 'folder'
-        && currentView === 'tree' && (entry.id || null) === activeField;
-      row.classList.toggle('is-open', isOpen);
-      row.setAttribute('aria-selected', String(isOpen));
-
-      if (entry.kind === 'all') {
-        row.innerHTML = '<span class="glyph">&#9678;</span><span class="picker-name">All</span>' +
-          '<span class="picker-meta">' + Store.roots().length + ' fields</span>';
-      } else if (entry.kind === 'folder') {
-        row.classList.toggle('is-expanded', entry.open);
-        row.setAttribute('aria-expanded', String(entry.open));
-        row.innerHTML =
-          '<span class="picker-caret">' + (entry.open ? '&#9662;' : '&#9656;') + '</span>' +
-          '<span class="picker-name">' + escapeHtml(entry.name) + '</span>' +
-          '<span class="picker-meta">' +
-            (entry.count === 1 ? '1 field' : entry.count + ' fields') + '</span>' +
-          '<span class="picker-edit" role="button" tabindex="-1" ' +
-            'title="Rename this folder">\u270E</span>' +
-          '<span class="picker-del" role="button" tabindex="-1" ' +
-            'title="Remove this folder — the fields on it stay">&times;</span>';
-        row.title = 'Show or hide what is in ' + entry.name;
-        row.querySelector('.picker-edit').addEventListener('click', ev => {
-          ev.stopPropagation();
-          renameFolderInline(row, entry);
-        });
-        row.querySelector('.picker-del').addEventListener('click', ev => {
-          ev.stopPropagation();
-          const freed = Store.deleteFolder(entry.id);
-          shutFolders.delete(entry.id);
-          persistUi();
-          renderPickerList();
-          renderTabs();
-          /* An open Details panel is still offering the folder that has just
-             gone; rebuilding it drops the choice rather than letting someone
-             pick something the store will quietly refuse. */
-          Views.renderInspector(selectedId);
-          toast(freed
-            ? `Folder removed — ${freed === 1 ? 'its field is' : 'its ' + freed + ' fields are'} back at the top level.`
-            : 'Folder removed.');
-        });
-      } else {
-        row.innerHTML =
-          '<span class="dot" style="background:var(' + Store.STATUS_BY_ID[entry.status].cssVar + ')"></span>' +
-          '<span class="picker-name">' + escapeHtml(entry.name) + '</span>' +
-          '<span class="picker-meta">' + Store.descendantsOf(entry.id).length + ' topics</span>' +
-          '<span class="picker-pct">' + Math.round(Store.progressOf(entry.id) * 100) + '%</span>';
-      }
-
-      row.addEventListener('click', () => {
-        if (entry.kind === 'folder') { pickerIndex = i; toggleFolder(entry.id); return; }
-        closeFieldPicker();
-        openField(entry.id);
-      });
-
-      row.addEventListener('mousemove', () => {
+    rows.forEach((entry, i) => list.appendChild(entryRow(entry, {
+      cursor:  i === pickerIndex,
+      manage:  true,
+      onHover: () => {
         if (pickerIndex === i) return;
         pickerIndex = i;
         [...list.children].forEach((el, j) => el.classList.toggle('is-cursor', j === i));
-      });
-      list.appendChild(row);
-    });
+      },
+      onFolder: id => { pickerIndex = i; toggleFolder(id); },
+      onField:  id => { closeFieldPicker(); openField(id); },
+    })));
 
     const cursor = list.querySelector('.is-cursor');
     if (cursor && typeof cursor.scrollIntoView === 'function') {
@@ -646,16 +675,39 @@
 
   /* Renaming happens over the row itself rather than in a prompt, the same way
      renaming a card does. */
-  function renameFolderInline(row, entry) {
+  /* Renaming and moving are one gesture, because both answer "where does this
+     belong": a name box and, once there is somewhere to move it to, a list of
+     the folders it could sit inside. Only folders that would not make the tree
+     contain itself are offered. */
+  function editFolderInline(row, entry) {
     const label = row.querySelector('.picker-name');
     if (!label) return;
+
+    const editor = document.createElement('span');
+    editor.className = 'picker-editor';
 
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'picker-rename';
     input.value = entry.name;
     input.setAttribute('aria-label', 'Folder name');
-    label.replaceWith(input);
+    editor.appendChild(input);
+
+    const targets = Store.folders()
+      .filter(f => f.id !== entry.id && !Store.folderWouldCycle(entry.id, f.id));
+    let move = null;
+    if (targets.length) {
+      move = document.createElement('select');
+      move.className = 'picker-move';
+      move.setAttribute('aria-label', 'Folder it sits inside');
+      const own = Store.folderById(entry.id);
+      move.innerHTML = '<option value="">— top level —</option>' +
+        targets.map(f => `<option value="${escapeHtml(f.id)}"${f.id === (own && own.parentId) ? ' selected' : ''}>` +
+          '\u00a0\u00a0'.repeat(Store.folderDepth(f.id)) + escapeHtml(f.name) + '</option>').join('');
+      editor.appendChild(move);
+    }
+
+    label.replaceWith(editor);
     input.focus();
     input.select();
 
@@ -663,34 +715,76 @@
     const finish = commit => {
       if (settled) return;
       settled = true;
-      if (commit) Store.renameFolder(entry.id, input.value);
+      if (commit) {
+        Store.renameFolder(entry.id, input.value);
+        if (move) Store.setFolderParent(entry.id, move.value || null);
+      }
       renderPickerList();
       renderTabs();
     };
-    input.addEventListener('keydown', ev => {
-      ev.stopPropagation();
-      if (ev.key === 'Enter')  { ev.preventDefault(); finish(true); }
-      if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+    const stop = ev => ev.stopPropagation();
+    [input, move].filter(Boolean).forEach(el => {
+      el.addEventListener('keydown', ev => {
+        ev.stopPropagation();
+        if (ev.key === 'Enter')  { ev.preventDefault(); finish(true); }
+        if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+      });
+      el.addEventListener('click', stop);
+      el.addEventListener('dblclick', stop);
     });
-    input.addEventListener('blur', () => finish(true));
-    input.addEventListener('click', ev => ev.stopPropagation());
-    input.addEventListener('dblclick', ev => ev.stopPropagation());
+    /* Blur only settles it once focus has left the editor entirely, or moving
+       from the name to the list would close it. */
+    editor.addEventListener('focusout', () => {
+      setTimeout(() => { if (!editor.contains(document.activeElement)) finish(true); }, 0);
+    });
+  }
+
+  function removeFolder(entry) {
+    const freed = Store.deleteFolder(entry.id);
+    shutFolders.delete(entry.id);
+    persistUi();
+    renderPickerList();
+    renderTabs();
+    /* An open Details panel is still offering the folder that has just gone;
+       rebuilding it drops the choice rather than letting someone pick
+       something the store will quietly refuse. */
+    Views.renderInspector(selectedId);
+    toast(freed
+      ? `Folder removed — ${freed === 1 ? 'its field is' : 'its ' + freed + ' fields are'} back where it was.`
+      : 'Folder removed.');
   }
 
   /* A new folder starts open and named, ready to have fields put on it. */
-  function startNewFolder() {
+  /* A new folder is named where it will live, so it is obvious what it is
+     going inside. Given a parent it starts as a sub-folder of it. */
+  function startNewFolder(parentId = null) {
     const list = document.getElementById('fieldPickerList');
+    if (parentId) shutFolders.delete(parentId);
+    renderPickerList();
+
+    const depth = parentId ? Store.folderDepth(parentId) + 1 : 0;
     const row = document.createElement('div');
     row.className = 'picker-row picker-folder';
+    if (depth) row.style.paddingLeft = (8 + depth * 15) + 'px';
     row.innerHTML = '<span class="picker-caret">&#9662;</span>';
 
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'picker-rename';
-    input.placeholder = 'Folder name, e.g. Mathematics';
+    input.placeholder = parentId
+      ? 'Folder inside ' + (Store.folderById(parentId) || {}).name
+      : 'Folder name, e.g. Mathematics';
     input.setAttribute('aria-label', 'Name of the new folder');
     row.appendChild(input);
-    list.appendChild(row);
+
+    /* Straight after the folder it belongs to, or at the end when it is a new
+       top-level one, so it appears where it is going to end up. */
+    const after = parentId
+      ? [...list.children].filter(el => el.dataset && el.dataset.folder === parentId).pop()
+      : null;
+    if (after && after.nextSibling) list.insertBefore(row, after.nextSibling);
+    else if (after) list.appendChild(row);
+    else list.appendChild(row);
     input.focus();
 
     let settled = false;
@@ -699,11 +793,13 @@
       settled = true;
       const name = input.value.trim();
       if (commit && name) {
-        const folder = Store.addFolder(name);
+        const folder = Store.addFolder(name, parentId);
         shutFolders.delete(folder.id);
         persistUi();
         renderTabs();
-        toast(`Made "${folder.name}" — put a field on it from its Details panel.`);
+        toast(parentId
+          ? `Made "${folder.name}" inside ${(Store.folderById(parentId) || {}).name}.`
+          : `Made "${folder.name}" — put a field on it from its Details panel.`);
       }
       renderPickerList();
     };
@@ -806,10 +902,10 @@
     document.getElementById('fieldPickerList').addEventListener('dblclick', ev => {
       const row = ev.target.closest('.picker-folder');
       if (!row || !row.dataset.folder) return;
-      const folder = Store.folders().find(f => f.id === row.dataset.folder);
+      const folder = Store.folderById(row.dataset.folder);
       if (!folder) return;
       ev.stopPropagation();
-      renameFolderInline(row, folder);
+      editFolderInline(row, folder);
     });
 
     search.addEventListener('keydown', ev => {
