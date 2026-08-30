@@ -2386,6 +2386,10 @@ const Store = (() => {
       version:  state.version,
       profile:  state.profile,
       nodes:    [...state.nodes, ...parsed.nodes.filter(n => !byId(String(n.id)))],
+      /* Loading a file is not a reason to throw away a session that is running
+         right now — merging the private half mid-session used to stop the
+         clock and lose what was on it. */
+      focus_timer: state.focus_timer,
       folders:  [...state.folders,
         ...(parsed.folders || []).filter(x => !haveFolders.has(String(x.id)))],
       sessions: [...state.sessions, ...(parsed.sessions || []).filter(x => !haveSessions.has(String(x.id)))],

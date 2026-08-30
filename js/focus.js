@@ -16,6 +16,11 @@ const Focus = (() => {
   let onNavigate = () => {};
   let ticker = null;
   let returnFocusTo = null;     // what had the keyboard before the screen took it
+  /* A note still waiting to be written. It has to be dropped when a session
+     ends, or the last thing typed into one lands on the next one started
+     within the second. */
+  let pendingIntent = null;
+  const forgetPendingIntent = () => { clearTimeout(pendingIntent); pendingIntent = null; };
   let baseTitle = document.title;
 
   /* ---------------- formatting ---------------- */
@@ -93,7 +98,19 @@ const Focus = (() => {
      display:none, every keyboard shortcut in the app reads as "they are
      typing" and does nothing until something is clicked. */
   function close() {
+    dismiss();
+    render();
+  }
+
+  /* Takes the screen down and brings the keyboard back out with it. Every way
+     the screen can go away goes through here — closing it by hand, and the
+     store taking the clock away underneath it — because focus left inside a
+     panel that is now display:none makes every shortcut in the app read as
+     "they are typing" until something is clicked. */
+  function dismiss() {
     const screen = $('focusScreen');
+    if (screen.hidden) { returnFocusTo = null; return; }
+
     const inside = screen.contains(document.activeElement);
     screen.hidden = true;
     if (inside) {
@@ -103,7 +120,6 @@ const Focus = (() => {
       }
     }
     returnFocusTo = null;
-    render();
   }
 
   function render() {
@@ -111,10 +127,12 @@ const Focus = (() => {
     const screen = $('focusScreen');
 
     if (!timer) {
-      screen.hidden = true;
+      dismiss();
       stopTicking();
       $('focusPill').hidden = true;
-      document.title = baseTitle;
+      /* From the profile rather than from whatever the title happened to be
+         at start-up, which goes stale the moment the profile is renamed. */
+      document.title = (Store.state.profile && Store.state.profile.name) || baseTitle;
       return;
     }
 
@@ -187,14 +205,33 @@ const Focus = (() => {
 
   /* ---------------- the clock ---------------- */
 
-  /* One interval for the whole app, running only while there is something to
-     show, and redrawing the clock rather than the page. */
+  /* Once a second, only what a second changes: the two clock faces and the
+     title. A full render reads the whole day's activity and the topic's
+     branch to work out the totals underneath, which is not a thing to do
+     sixty times a minute for a number that changes once an hour. */
+  function tick() {
+    const timer = Store.activeFocus();
+    if (!timer) { stopTicking(); render(); return; }
+
+    const node = Store.byId(timer.nodeId);
+    const elapsed = Store.focusElapsedMs();
+    const live = timer.startedAt != null;
+    const face = clock(elapsed);
+
+    $('focusPill').textContent = `${live ? '\u25CF' : '\u23F8'} ${face}`;
+    document.title = `${live ? '\u25CF' : '\u23F8'} ${face} · ${node ? node.name : ''}`;
+
+    if ($('focusScreen').hidden) return;
+    $('focusElapsed').textContent = face;
+    $('focusAway').textContent = awayText(timer, Store.focusPausedMs());
+    /* Stopping becomes worth doing the moment there is a minute to log. */
+    $('focusStop').disabled = Math.round(elapsed / 60000) < 1;
+  }
+
+  /* One interval for the whole app, running only while there is a clock. */
   function startTicking() {
     if (ticker) return;
-    ticker = setInterval(() => {
-      if (!Store.activeFocus()) { stopTicking(); render(); return; }
-      render();
-    }, 1000);
+    ticker = setInterval(tick, 1000);
   }
 
   function stopTicking() {
@@ -216,6 +253,7 @@ const Focus = (() => {
   function stop({ quiet = false } = {}) {
     if (!Store.activeFocus()) return null;
 
+    forgetPendingIntent();
     Store.setFocusIntent($('focusIntent').value);
     const done = Store.stopFocus();
     close();
@@ -230,6 +268,7 @@ const Focus = (() => {
     const elapsed = Store.focusElapsedMs();
     if (Math.round(elapsed / 60000) >= 1 &&
         !window.confirm(`Throw away ${clock(elapsed)} without logging it?`)) return false;
+    forgetPendingIntent();
     Store.discardFocus();
     close();
     stopTicking();
@@ -258,11 +297,10 @@ const Focus = (() => {
     });
 
     /* Saved as it is typed, so a reload mid-session does not lose the note. */
-    let typing;
     $('focusIntent').addEventListener('input', () => {
-      clearTimeout(typing);
+      clearTimeout(pendingIntent);
       const value = $('focusIntent').value;
-      typing = setTimeout(() => Store.setFocusIntent(value), 400);
+      pendingIntent = setTimeout(() => Store.setFocusIntent(value), 400);
     });
     $('focusIntent').addEventListener('keydown', ev => {
       ev.stopPropagation();
@@ -283,6 +321,12 @@ const Focus = (() => {
       if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); close(); }
       if (ev.key === ' ')      { ev.preventDefault(); ev.stopPropagation(); toggle(); }
     }, true);
+
+    /* The screen reads the store, so it follows the store rather than
+       whichever caller happened to remember to redraw it. Deleting the topic
+       being timed clears the clock several layers away from here; without
+       this the screen went on counting for something that was gone. */
+    Store.onChange(render);
 
     /* A session that was already running when the page loaded. */
     if (Store.activeFocus()) { startTicking(); render(); }

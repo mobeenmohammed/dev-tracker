@@ -1949,6 +1949,52 @@ check('saying the lost stretch was not counted',
 click($('#focusDiscard'));
 click(tabNamed('All'));
 
+/* ---------- 20. the stopwatch follows the store ---------- */
+
+/* The screen is a drawing of the store, so anything that changes the store has
+   to be able to change the screen — including things several layers away that
+   have no idea a stopwatch exists. */
+click(tabNamed('C++'));
+window.Views.renderInspector('cpp-sanitizers');
+click($('#focusBtn'));
+check('a stopwatch is running on a topic', !$('#focusScreen').hidden);
+
+window.Views.renderInspector('cpp-sanitizers');
+click($('#deleteBtn'));
+check('deleting the topic being timed stops the clock', Store.activeFocus() === null);
+check('and takes the screen down with it', $('#focusScreen').hidden,
+      'a screen left counting for a topic that is gone');
+check('and the pill too', $('#focusPill').hidden);
+check('and the keyboard came back out with it',
+      !$('#focusScreen').contains(doc.activeElement), doc.activeElement.tagName);
+
+/* The title belongs to one of them at a time. */
+Focus.open('cpp-cmake');
+rewindClock(3 * 60000);
+Focus.render();
+check('the clock owns the title while it runs', /3:/.test(doc.title), doc.title);
+window.Views.renderInspector('cpp-cmake');
+click($('#f-name'));            // anything that triggers a refresh
+Store.updateNode('cpp-cmake', { name: 'CMake' });
+check('a redraw does not take the title back', /3:/.test(doc.title) || /\d:\d\d/.test(doc.title),
+      doc.title);
+click($('#focusDiscard'));
+check('and it comes back to the profile once the clock is gone',
+      doc.title === Store.state.profile.name, doc.title);
+
+/* A note still waiting to be written must not land on the next session. */
+Focus.open('cpp-cmake');
+const noteBox = $('#focusIntent');
+noteBox.value = 'belongs to the first one';
+fire(noteBox, 'input');
+click($('#focusDiscard'));                 // before the note has been written
+Focus.open('cpp-gdb');
+await new Promise(r => setTimeout(r, 450)); // long enough for the old write to fire
+check('a note left over from a discarded session does not land on the next',
+      (Store.activeFocus() || {}).intent === '',
+      JSON.stringify((Store.activeFocus() || {}).intent));
+click($('#focusDiscard'));
+
 if (errors.length) {
   console.log('--- runtime errors ---');
   errors.forEach(e => console.log('  ' + e));

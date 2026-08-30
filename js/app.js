@@ -144,7 +144,9 @@
     const p = Store.state.profile;
     document.getElementById('profileName').textContent = p.name || 'Learning Tree';
     document.getElementById('profileSubtitle').textContent = p.subtitle || '';
-    document.title = p.name || 'Learning Tree';
+    /* While a stopwatch is running the title is the clock, and the two must
+       not fight over it a second at a time. */
+    if (!Store.activeFocus()) document.title = p.name || 'Learning Tree';
 
     Tree.render();
     renderTabs();
@@ -522,22 +524,24 @@
 
      Each row carries its depth, which is the only thing the drawing needs to
      know about how deep it sits. */
-  function folderRows(parentId, depth, q) {
+  /* Walks a tree the store built once, rather than asking for the subtree
+     again at every level — which built the whole thing below it each time. */
+  function rowsFromTree(tree, depth, q) {
     const rows = [];
     const hit = name => !q || name.toLowerCase().includes(q);
-    const tree = Store.folderTree(parentId);
 
-    tree.folders.forEach(({ folder, count }) => {
+    tree.folders.forEach(group => {
       /* A folder whose own name matches shows everything inside it; otherwise
          it shows only what matched, and drops out if nothing did. A search
          opens folders, because a closed one hiding the only hit would look
          like no hit at all. */
-      const named = q && hit(folder.name);
-      const inside = folderRows(folder.id, depth + 1, named ? '' : q);
+      const named = q && hit(group.folder.name);
+      const inside = rowsFromTree(group, depth + 1, named ? '' : q);
       if (q && !named && !inside.length) return;
 
-      const open = q ? true : folderOpen(folder.id);
-      rows.push({ kind: 'folder', id: folder.id, name: folder.name, count, open, depth });
+      const open = q ? true : folderOpen(group.folder.id);
+      rows.push({ kind: 'folder', id: group.folder.id, name: group.folder.name,
+                  count: group.count, open, depth });
       if (open) rows.push(...inside);
     });
 
@@ -546,6 +550,9 @@
 
     return rows;
   }
+
+  const folderRows = (parentId, depth, q) =>
+    rowsFromTree(Store.folderTree(parentId), depth, q);
 
   function pickerRows() {
     const box = document.getElementById('fieldPickerSearch');

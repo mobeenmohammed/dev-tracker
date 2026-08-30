@@ -1403,5 +1403,23 @@ Store.startFocus('cpp');
 Store.deleteNode('cpp');
 check('deleting the topic being timed stops the clock', Store.activeFocus(), null);
 
+/* --- a running stopwatch survives a file being loaded into it --- */
+
+/* Loading the private half on a second device is an ordinary thing to do
+   halfway through a session, and it used to stop the clock and lose it. */
+Store.importJSON(JSON.stringify({ nodes: [{ id: 'here', parentId: null, name: 'Here' }] }));
+Store.startFocus('here', 'mid-session');
+Store.activeFocus().startedAt -= 18 * 60000;
+check('a stopwatch is running', Math.round(Store.focusElapsedMs() / 60000), 18);
+
+Store.mergeJSON(JSON.stringify({
+  nodes: [{ id: 'elsewhere', parentId: null, name: 'Elsewhere', private: true }],
+}));
+check('merging a file leaves it running',
+      Store.activeFocus() && Math.round(Store.focusElapsedMs() / 60000), 18);
+check('with what was being done',   Store.activeFocus().intent, 'mid-session');
+check('and the merge still happened', !!Store.byId('elsewhere'), true);
+Store.discardFocus();
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
