@@ -106,6 +106,27 @@ check('and what is inside a folder is marked as nested',
 check('the indent rail can be positioned against the row',
       probeRow('picker-row').position === 'relative');
 
+/* The edges are the content of a knowledge graph. Half-opacity hairlines over
+   a dark canvas were close to invisible, which made the graph a picture of
+   cards rather than of relationships. */
+{
+  const probe = cls => {
+    const p = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('class', cls);
+    doc.querySelector('#links').appendChild(p);
+    return window.getComputedStyle(p);
+  };
+  const ref = probe('ref-link');
+  const connect = probe('link is-connect');
+  check('a reference line is close to opaque', Number(ref.opacity) >= 0.8, ref.opacity);
+  check('and thick enough to follow', parseFloat(ref.strokeWidth) >= 2, ref.strokeWidth);
+  check('a connection line too',
+        Number(connect.opacity) >= 0.9 && parseFloat(connect.strokeWidth) >= 2,
+        `${connect.opacity} / ${connect.strokeWidth}`);
+  check('and both are laid over a casing in the canvas colour',
+        /\.link-casing\s*\{[^}]*stroke:\s*var\(--bg\)/.test(css));
+}
+
 /* Every id has to be unique, or getElementById quietly hands back the wrong
    element. The stopwatch's heading and the task view's topic select were both
    called focusTopic, so the heading won and the picker was never filled —

@@ -63,8 +63,20 @@ const nodeLabel = el => {
 };
 const nodeNamed = name => treeNodes().find(el => nodeLabel(el).startsWith(name));
 // a card handles clicks on its own div; a radial node handles them on the <g>
+/* In the All graph only the open field's topics are drawn, so reaching a
+   sub-topic means opening its field first — which is what a person does, and
+   what the checks below exercise explicitly where it is the point. */
 const clickNode = name => {
-  const n = nodeNamed(name);
+  let n = nodeNamed(name);
+  if (!n && Tree.isGraph) {
+    const target = Store.state.nodes.find(x => x.name.startsWith(name));
+    const field = target && Store.domainOf(target.id);
+    const fieldCard = field && nodeNamed(field.name);
+    if (fieldCard) {
+      click(fieldCard.querySelector('.card') || fieldCard);
+      n = nodeNamed(name);
+    }
+  }
   if (!n) throw new Error('no node named ' + name);
   click(n.querySelector('.card') || n);
 };
@@ -79,9 +91,10 @@ check('All tab present', !!tabNamed('All'));
 check('C++ tab present', !!tabNamed('C++'));
 check('field tab shows progress', /\d+%/.test(tabNamed('C++').textContent), tabNamed('C++').textContent);
 check('All tab active on boot', tabNamed('All').classList.contains('is-active'));
-// All is a graph of every node, with no synthetic centre invented for it.
-check('the All view graphs every node', treeNodes().length === Store.state.nodes.length,
-      `${treeNodes().length} cards vs ${Store.state.nodes.length} nodes`);
+/* All draws the fields, with no synthetic centre invented for it, and opens
+   whichever one you are looking at rather than everything at once. */
+check('the All view graphs the fields', treeNodes().length === Store.roots().length,
+      `${treeNodes().length} cards vs ${Store.roots().length} fields`);
 check('All is in graph mode', Tree.isGraph === true);
 
 /* ---------- 2. focusing one field ---------- */
@@ -148,6 +161,11 @@ window.Views.renderList();
 
 /* ---------- 3b. last-worked cues ---------- */
 click(tabNamed('All'));           // OpenMP lives under HPC, not the C++ tab
+check('the graph starts with the fields alone', !nodeNamed('OpenMP'),
+      'a sub-topic is drawn before its field was opened');
+clickNode('High Performance Computing');   // selecting a field opens it
+check('selecting a field opens it', !!nodeNamed('OpenMP'),
+      'the field did not unfold');
 clickNode('OpenMP');
 check('inspector reports last worked', /last worked/.test($('#inspectorBody').textContent),
       $('#inspectorBody').textContent.slice(0, 80));
@@ -273,6 +291,7 @@ check('graph cards do not overlap', (() => {
 })(), 'two graph cards share space');
 
 // a reference between two topics in different fields
+clickNode('Mathematics');                   // opens the field it is in
 clickNode('Probability & Statistics');
 check('references section present', /References/.test($('#inspectorBody').textContent));
 const refForm = $('.ref-add');
@@ -287,6 +306,7 @@ check('the arrow is marked', !!$('#links .ref-link').getAttribute('marker-end'))
 check('the label shows for the selection', $$('#links .ref-label').length === 1);
 
 // it shows from the other end too
+clickNode('High Performance Computing');    // opens the field the far end is in
 clickNode('Roofline Model');
 check('the far end lists it', Store.linksFor('hpc-roofline').in.length === 1);
 check('shown as incoming', /References \(1\)/.test($('#inspectorBody').textContent));
@@ -1119,9 +1139,9 @@ check('the connection arrow stops short of the card it points at',
         });
         return !target;                     // the end must not land inside a card
       })(), $('#links .link.is-connect').getAttribute('d'));
-check('the graph still draws every topic exactly once',
-      treeNodes().length === Store.state.nodes.length,
-      `${treeNodes().length} vs ${Store.state.nodes.length}`);
+check('the graph draws every card exactly once',
+      treeNodes().length === new Set(treeNodes().map(nodeLabel)).size,
+      `${treeNodes().length} cards, ${new Set(treeNodes().map(nodeLabel)).size} distinct`);
 click(tabNamed('C++'));
 
 /* Borrowed cards are a window, not a second copy: they do not offer to rename
@@ -1361,7 +1381,7 @@ click($('#deleteBtn'));
 check('the canvas knows it is a graph again',
       $('.canvas-wrap').classList.contains('is-graph'));
 check('the re-layout button works again', !$('#relayoutBtn').disabled);
-check('and the hint describes the graph', /Drag a card/.test($('#canvasHint').textContent),
+check('and the hint describes the graph', /Select a field/.test($('#canvasHint').textContent),
       $('#canvasHint').textContent);
 
 /* ---------- 15. a failed save is put in front of you ---------- */
@@ -2162,6 +2182,90 @@ check('a task with no topic is fine', noTopic && noTopic.nodeId === null,
 Store.deleteNode(bare.id);
 Store.deleteFolder(taskInner.id);
 Store.deleteFolder(taskFolder.id);
+
+/* ---------- 23. the All graph opens one field at a time ---------- */
+
+click(tabNamed('All'));
+Tree.select(null);
+Store.state.links.slice().forEach(l => Store.deleteLink(l.id));
+Store.state.connections.slice().forEach(c => Store.deleteConnection(c.id));
+Tree.render();
+
+const cardNames = () => treeNodes().map(nodeLabel);
+check('it starts as the fields alone',
+      cardNames().sort().join() === Store.roots().map(r => r.name).sort().join(),
+      cardNames().join(' | '));
+
+/* Selecting a field unfolds it; selecting another folds the first away. */
+clickNode('High Performance Computing');
+check('selecting a field shows what is in it',
+      cardNames().includes('OpenMP'), cardNames().join(' | '));
+check('and leaves the other fields folded',
+      !cardNames().includes('Random Variables'), cardNames().join(' | '));
+
+clickNode('Mathematics');
+check('selecting another folds the first back up',
+      !cardNames().includes('OpenMP'), cardNames().join(' | '));
+check('and opens the new one', cardNames().includes('Random Variables'), cardNames().join(' | '));
+
+Tree.select(null);
+check('deselecting folds everything back to the fields',
+      cardNames().sort().join() === Store.roots().map(r => r.name).sort().join(),
+      cardNames().join(' | '));
+
+/* A relationship into a folded field is not lost: it is drawn to the field. */
+Store.addLink('math-prob', 'hpc-roofline', 'used for modelling');
+Tree.render();
+const refEnds = () => $$('#links .ref-link').length;
+check('a reference between two folded fields is still drawn', refEnds() === 1,
+      `${refEnds()} reference lines`);
+
+clickNode('Mathematics');
+check('opening one end keeps it drawn', refEnds() === 1, `${refEnds()} lines`);
+check('and the topic it really starts from is now on screen',
+      cardNames().includes('Probability & Statistics'), cardNames().join(' | '));
+
+/* Several relationships into one folded field become one line with a count. */
+/* Built from whatever topics are still alive at this point, so the check is
+   about folding rather than about which fixtures earlier sections left. */
+const mathSide = Store.descendantsOf('math').filter(n => !Store.linksFor(n.id).out.length);
+const hpcSide  = Store.descendantsOf('hpc');
+Store.addLink(mathSide[0].id, hpcSide[0].id);
+Store.addLink(mathSide[1].id, hpcSide[1].id);
+const foldedLinks = Store.state.links.length;
+check('three separate relationships between the two fields', foldedLinks === 3,
+      `${foldedLinks} links: ` + Store.state.links.map(l => l.from + '>' + l.to).join(','));
+
+Tree.select(null);
+Tree.render();
+check('they fold into one line while both fields are folded',
+      refEnds() === 1, `${refEnds()} lines`);
+check('and it says how many', $('#links .edge-count text').textContent === String(foldedLinks),
+      $('#links .edge-count') ? $('#links .edge-count text').textContent : 'no count drawn');
+
+clickNode('High Performance Computing');
+check('opening a field resolves them into separate lines', refEnds() === foldedLinks,
+      `${refEnds()} lines`);
+check('so the count is no longer needed', !$('#links .edge-count'));
+
+/* Every line is laid over a casing, or crossings read as a smudge. */
+check('the lines are drawn over a casing so they stay readable when they cross',
+      $$('#links .link-casing').length >= refEnds(),
+      `${$$('#links .link-casing').length} casings for ${refEnds()} lines`);
+
+/* And there is a way to see the lot at once. */
+click($('#expandAllBtn'));
+check('the expand button shows every topic', treeNodes().length === Store.state.nodes.length,
+      `${treeNodes().length} vs ${Store.state.nodes.length}`);
+check('and says it is on', $('#expandAllBtn').classList.contains('is-on'));
+check('the hint says so too', /Every topic at once/.test($('#canvasHint').textContent),
+      $('#canvasHint').textContent);
+click($('#expandAllBtn'));
+check('pressing it again goes back to one field at a time',
+      treeNodes().length < Store.state.nodes.length, `${treeNodes().length} cards`);
+
+Store.state.links.slice().forEach(l => Store.deleteLink(l.id));
+Tree.render();
 
 if (errors.length) {
   console.log('--- runtime errors ---');

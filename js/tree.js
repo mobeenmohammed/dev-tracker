@@ -12,15 +12,17 @@ const Tree = (() => {
   const MIN_SCALE = 0.12;
   const MAX_SCALE = 3.5;
 
-  /* card metrics, by depth */
+  /* Card metrics, by depth. Titles clamp to two lines, so a card has to be
+     tall enough to hold two — "Building Blocks - Sets and Logic" was being cut
+     off mid-word by a card sized for one. */
   const CARD = [
-    { w: 220, h: 72 },   // the centre
-    { w: 200, h: 66 },   // fields
-    { w: 184, h: 62 },   // everything below
+    { w: 244, h: 86 },   // the centre
+    { w: 228, h: 82 },   // fields
+    { w: 212, h: 78 },   // everything below
   ];
   const cardFor = depth => CARD[Math.min(depth, CARD.length - 1)];
-  const COL_GAP = 26;    // horizontal space between siblings
-  const ROW_GAP = 54;    // vertical space between generations
+  const COL_GAP = 34;    // horizontal space between siblings
+  const ROW_GAP = 72;    // vertical space between generations
 
   let svg, gViewport, gLinks, gNodes;
   let onSelect = () => {};
@@ -202,18 +204,89 @@ const Tree = (() => {
     budget:     25e6,
     minSteps:   60,
     warmSteps:  70,
-    repulsion:  46000,
-    springLen:  132,
-    springK:    0.055,
-    refLen:     190,
-    refK:       0.022,
-    centering:  0.012,
+    /* Room to read. A knowledge graph that touches is a picture of nothing:
+       the edges are the content, and they need space to be followed. */
+    repulsion:  86000,
+    springLen:  205,
+    springK:    0.05,
+    refLen:     280,
+    refK:       0.02,
+    centering:  0.010,
     damping:    0.86,
     maxStep:    38,
+    /* Clear air kept around every card when overlaps are pushed apart. */
+    padX:       38,
+    padY:       30,
   };
 
+  /* ---------------- what the All graph shows ----------------
+
+     Every topic at once is a hairball, and a hairball is a picture of nothing.
+     The graph draws the fields, and opens the one you are looking at: select
+     anything and its field unfolds, select something else and the last one
+     folds away again. One field's worth of detail at a time, with the whole
+     shape still around it.
+
+     A relationship into a topic that is folded away is not dropped — it is
+     drawn to the field holding it instead, so the graph still says "these two
+     fields are related, and the detail is in there". Several rolling into one
+     pair are drawn as one edge carrying a count. Opening either end resolves
+     them into the real topics. */
+
+  let graphShowAll = false;      // the escape hatch: draw every topic at once
+
+  function graphVisibleIds() {
+    const ids = new Set(Store.state.nodes.filter(n => !n.parentId).map(n => n.id));
+    if (graphShowAll) return new Set(Store.state.nodes.map(n => n.id));
+
+    const focused = selectedId ? Store.byId(selectedId) : null;
+    const field = focused ? Store.domainOf(focused.id) : null;
+    if (field) {
+      ids.add(field.id);
+      Store.descendantsOf(field.id).forEach(n => ids.add(n.id));
+    }
+    return ids;
+  }
+
+  /* The nearest thing up the tree that is actually on screen. */
+  function visibleAnchor(id, visible) {
+    let node = Store.byId(id);
+    while (node && !visible.has(node.id)) {
+      node = node.parentId ? Store.byId(node.parentId) : null;
+    }
+    return node ? node.id : null;
+  }
+
+  /* Maps every relationship onto what is drawn, folding the ones that end
+     inside a closed field up onto the field and merging duplicates. */
+  function rollUp(pairs, visible) {
+    const merged = new Map();
+    pairs.forEach(({ from, to, kind, label }) => {
+      const a = visibleAnchor(from, visible);
+      const b = visibleAnchor(to, visible);
+      if (!a || !b || a === b) return;          // both ends inside one folded field
+      const key = kind + ':' + a + '>' + b;
+      const seen = merged.get(key);
+      if (seen) {
+        seen.count += 1;
+        seen.rolled = true;
+        /* Several relationships now share one line, so no single label is
+           true of it any more; the count says what it is instead. */
+        seen.label = '';
+        return;
+      }
+      merged.set(key, {
+        from: a, to: b, kind, count: 1,
+        label: label || '',
+        rolled: a !== from || b !== to,
+      });
+    });
+    return [...merged.values()];
+  }
+
   function graphNodes() {
-    return Store.state.nodes.map(n => ({
+    const visible = graphVisibleIds();
+    return Store.state.nodes.filter(n => visible.has(n.id)).map(n => ({
       id: n.id,
       key: n.id,                  // the graph draws each topic exactly once
       name: n.name,
@@ -241,15 +314,27 @@ const Tree = (() => {
     let known = 0;
     nodes.forEach((n, i) => {
       const cached = graphPos.get(n.id);
-      if (cached) { n.x = cached.x; n.y = cached.y; known++; }
-      else {
+      if (cached) { n.x = cached.x; n.y = cached.y; known++; return; }
+
+      /* A topic appearing because its field was just opened starts beside that
+         field rather than out on the ring — otherwise opening one flings its
+         contents in from the edge of the picture and everything shuffles to
+         make room. */
+      const source = Store.byId(n.id);
+      const near = source && source.parentId ? graphPos.get(source.parentId) : null;
+      if (near) {
+        const spread = (i % 7) - 3;
+        n.x = near.x + spread * 26;
+        n.y = near.y + 90 + Math.abs(spread) * 14;
+      } else {
         const angle = (i / Math.max(1, nodes.length)) * Math.PI * 2;
-        const radius = 160 + (i % 7) * 42;
+        const radius = 220 + (i % 7) * 52;
         n.x = Math.cos(angle) * radius;
         n.y = Math.sin(angle) * radius;
       }
       n.vx = 0; n.vy = 0;
     });
+    nodes.forEach(n => { n.vx = 0; n.vy = 0; });
 
     const pull = (list, restLength, k) => list.forEach(({ a, b }) => {
       const A = byId.get(a), B = byId.get(b);
@@ -308,8 +393,8 @@ const Tree = (() => {
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
           const A = nodes[i], B = nodes[j];
-          const overlapX = (A.w + B.w) / 2 + 16 - Math.abs(B.x - A.x);
-          const overlapY = (A.h + B.h) / 2 + 14 - Math.abs(B.y - A.y);
+          const overlapX = (A.w + B.w) / 2 + GRAPH.padX - Math.abs(B.x - A.x);
+          const overlapY = (A.h + B.h) / 2 + GRAPH.padY - Math.abs(B.y - A.y);
           if (overlapX <= 0 || overlapY <= 0) continue;
 
           moved = true;
@@ -343,13 +428,25 @@ const Tree = (() => {
       n.pinned = pinned.has(n.id);
     });
 
-    /* A connection is structural, so in the graph it pulls like parentage
-       rather than like a reference. */
-    const edges = Store.state.nodes
-      .filter(n => n.parentId)
-      .map(n => ({ a: n.parentId, b: n.id }))
-      .concat(Store.state.connections.map(c => ({ a: c.to, b: c.from, connect: true })));
-    const refs = Store.state.links.map(l => ({ a: l.from, b: l.to }));
+    const visible = graphVisibleIds();
+
+    /* Parentage is only drawn between two topics that are both on screen — a
+       child folded away has nothing to draw a line to. A connection is
+       structural, so it pulls like parentage rather than like a reference. */
+    const parentage = Store.state.nodes
+      .filter(n => n.parentId && visible.has(n.id) && visible.has(n.parentId))
+      .map(n => ({ a: n.parentId, b: n.id, kind: 'child', count: 1 }));
+
+    const connections = rollUp(
+      Store.state.connections.map(c => ({ from: c.to, to: c.from, kind: 'connect' })), visible)
+      .map(e => ({ a: e.from, b: e.to, kind: 'connect', count: e.count, rolled: e.rolled }));
+
+    const refs = rollUp(
+      Store.state.links.map(l => ({ from: l.from, to: l.to, kind: 'ref', label: l.label })), visible)
+      .map(e => ({ a: e.from, b: e.to, kind: 'ref',
+                   count: e.count, rolled: e.rolled, label: e.label }));
+
+    const edges = parentage.concat(connections);
 
     const signature = signatureOf(nodes, edges.concat(refs));
     if (signature !== graphSignature) {
@@ -362,7 +459,7 @@ const Tree = (() => {
       });
     }
 
-    return { nodes, edges };
+    return { nodes, edges, refs };
   }
 
   /* ---------------- rendering ---------------- */
@@ -409,7 +506,8 @@ const Tree = (() => {
     gLinks.replaceChildren();
     gNodes.replaceChildren();
 
-    const { all, edges } = isGraphMode() ? renderGraph() : renderTree();
+    const drawn = isGraphMode() ? renderGraph() : renderTree();
+    const { all, edges } = drawn;
 
     /* References attach to the topic where it really lives, so where a topic
        is drawn twice the original wins the lookup. */
@@ -422,21 +520,28 @@ const Tree = (() => {
     const lit = litSet(all);
     const isDim = n => lit && !lit.has(n.key);
 
-    edges.forEach(({ from, to, kind }) => {
+    edges.forEach(edge => {
+      const { from, to, kind } = edge;
       const cls = ['link'];
       if (kind === 'connect') cls.push('is-connect');
       if (isDim(to)) cls.push('is-dimmed');
       if (to.id === selectedId || from.id === selectedId) cls.push('is-hot');
       const arrowed = kind === 'connect';
-      const path = el('path', {
-        class: cls.join(' '),
-        d: arrowed && isGraphMode() ? insetPath(from, to) : linkPath(from, to),
-      });
+      const d = arrowed && isGraphMode() ? insetPath(from, to) : linkPath(from, to);
+
+      /* A wider stroke in the background colour underneath, so a line stays
+         readable where it crosses another instead of the two dissolving into
+         each other. Parentage does not need it: it never crosses much, and a
+         casing on every branch would look like a fence. */
+      if (arrowed) gLinks.appendChild(el('path', { class: 'link-casing', d }));
+
+      const path = el('path', { class: cls.join(' '), d });
       if (arrowed) path.setAttribute('marker-end', 'url(#connect-arrow)');
       gLinks.appendChild(path);
+      if (edge.count > 1) gLinks.appendChild(edgeCount(from, to, edge.count, 'connect'));
     });
 
-    if (showRefs) drawReferences(byId, isDim);
+    if (showRefs) drawReferences(byId, isDim, drawn.refs);
 
     all.forEach(n => gNodes.appendChild(cardNode(n, isDim(n))));
     layoutRoot = { children: [], flat: all };
@@ -455,44 +560,75 @@ const Tree = (() => {
 
   /* Everything at once: the force-directed graph. */
   function renderGraph() {
-    const { nodes, edges } = layoutGraph();
+    const { nodes, edges, refs } = layoutGraph();
     const byId = new Map(nodes.map(n => [n.id, n]));
+    const resolve = e => ({
+      from: byId.get(e.a), to: byId.get(e.b),
+      kind: e.kind, count: e.count || 1, rolled: !!e.rolled, label: e.label || '',
+    });
     return {
       all: nodes,
-      edges: edges
-        .map(e => ({ from: byId.get(e.a), to: byId.get(e.b), kind: e.connect ? 'connect' : 'child' }))
-        .filter(e => e.from && e.to),
+      edges: edges.map(resolve).filter(e => e.from && e.to),
+      refs: refs.map(resolve).filter(e => e.from && e.to),
     };
   }
 
   /* References are drawn as dashed, arrowed curves in their own colour, so a
      relationship is never mistaken for containment. */
-  function drawReferences(byId, isDim) {
-    Store.state.links.forEach(link => {
-      const from = byId.get(link.from);
-      const to   = byId.get(link.to);
-      if (!from || !to) return;          // an end is collapsed away or out of view
+  /* A small number where several relationships were folded into one line, so
+     "these two fields are related" carries how related without drawing four
+     lines on top of each other. */
+  function edgeCount(from, to, count, kind) {
+    const g = el('g', { class: 'edge-count is-' + kind });
+    const x = (from.x + to.x) / 2;
+    const y = (from.y + to.y) / 2;
+    g.appendChild(el('circle', { cx: x, cy: y, r: 9 }));
+    const text = el('text', { x, y: y + 3.5, 'text-anchor': 'middle' });
+    text.textContent = count;
+    g.appendChild(text);
+    return g;
+  }
 
-      const touchesSelection = link.from === selectedId || link.to === selectedId;
+  /* In a tree every reference is drawn as it is. In the graph they arrive
+     already folded onto whatever is on screen, so this draws what it is
+     given rather than reading the store again. */
+  function drawReferences(byId, isDim, folded) {
+    const list = folded || Store.state.links.map(link => ({
+      from: byId.get(link.from), to: byId.get(link.to),
+      label: link.label, count: 1,
+      touches: link.from === selectedId || link.to === selectedId,
+    }));
+
+    list.forEach(ref => {
+      const from = ref.from;
+      const to   = ref.to;
+      if (!from || !to) return;          // an end is folded away or out of view
+
+      const touches = ref.touches !== undefined
+        ? ref.touches
+        : from.id === selectedId || to.id === selectedId;
+
       const cls = ['ref-link'];
-      if (touchesSelection) cls.push('is-hot');
+      if (touches) cls.push('is-hot');
       if (isDim(from) && isDim(to)) cls.push('is-dimmed');
 
-      const path = el('path', {
-        class: cls.join(' '),
-        d: refPath(from, to),
-        'marker-end': touchesSelection ? 'url(#ref-arrow-hot)' : 'url(#ref-arrow)',
-      });
-      gLinks.appendChild(path);
+      const d = refPath(from, to);
+      gLinks.appendChild(el('path', { class: 'link-casing is-ref', d }));
+      gLinks.appendChild(el('path', {
+        class: cls.join(' '), d,
+        'marker-end': touches ? 'url(#ref-arrow-hot)' : 'url(#ref-arrow)',
+      }));
 
-      if (link.label && touchesSelection) {
+      if (ref.count > 1) { gLinks.appendChild(edgeCount(from, to, ref.count, 'ref')); return; }
+
+      if (ref.label && touches) {
         const label = el('text', {
           class: 'ref-label',
           x: (from.x + to.x) / 2,
           y: (from.y + to.y) / 2 - 6,
           'text-anchor': 'middle',
         });
-        label.textContent = link.label;
+        label.textContent = ref.label;
         gLinks.appendChild(label);
       }
     });
@@ -863,7 +999,21 @@ const Tree = (() => {
     render();
   }
 
-  function expandAll() { collapsed.clear(); render(); fit(); }
+  /* In a tree this unfolds every branch. In the graph, where only the field
+     you are looking at is opened, it is the escape hatch: everything at once,
+     and pressing it again goes back to the tidy view. */
+  function expandAll() {
+    if (isGraphMode()) {
+      graphShowAll = !graphShowAll;
+      render();
+      fit();
+      return graphShowAll;
+    }
+    collapsed.clear();
+    render();
+    fit();
+    return false;
+  }
 
   function setQuery(q) { query = (q || '').trim().toLowerCase(); render(); }
 
@@ -925,6 +1075,7 @@ const Tree = (() => {
     get selectedId()   { return selectedId; },
     get rootId()       { return rootId; },
     get showActivity() { return showActivity; },
+    get showsEveryTopic() { return graphShowAll; },
     get showRefs()     { return showRefs; },
     get isGraph()      { return isGraphMode(); },
   };

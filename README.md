@@ -116,13 +116,42 @@ its topics on the row below, and so on. Hierarchy is the right shape for one
 subject.
 
 **All** is not a hierarchy — topics reference each other across fields — so it
-is a force-directed graph of every card, in the spirit of a knowledge graph.
-Parent-child edges pull, every pair pushes, references pull more weakly, and
-the result settles into clusters. Drag any card to place it and it stays put;
-the button on the canvas lays the whole thing out again.
+is a force-directed graph in the spirit of a knowledge graph. Parent-child
+edges pull, every pair pushes, references pull more weakly, and the result
+settles into clusters. Drag any card to place it and it stays put; the button
+on the canvas lays the whole thing out again.
 
 Positions are cached, so selecting a card or ticking something off never
 reshuffles the picture.
+
+#### One field at a time
+
+Every topic at once is a hairball, and a hairball is a picture of nothing. So
+the graph draws the **fields**, and opens the one you are looking at: select
+anything and its field unfolds, select something else and the last one folds
+away again. One field's worth of detail, with the whole shape still around it.
+**⊕** on the canvas is the escape hatch — every topic at once, and again to go
+back.
+
+A relationship into a topic that is folded away is **not** dropped, which is
+the awkward case worth being explicit about. It is drawn to the field holding
+it instead, so the graph still says *these two are related, and the detail is
+in there*. Several folding onto the same pair become one line carrying a
+count, since no single label is true of it any more. Opening either end
+resolves them back into the real topics.
+
+Newly opened topics start beside the field they came out of rather than on the
+outer ring, so unfolding one reads as it opening rather than as the picture
+rearranging itself.
+
+#### Seeing the edges
+
+The edges are the content of a knowledge graph, so they are drawn to be
+followed: opaque rather than faint, thick enough to trace, and laid over a
+**casing** in the canvas colour so a crossing reads as one line passing under
+another instead of the two dissolving into each other. Arrowheads stop at a
+card's real edge — a card is a wide rectangle, so a single radius left them
+buried underneath it.
 
 ### References and prerequisites
 

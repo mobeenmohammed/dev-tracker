@@ -1009,9 +1009,17 @@
 
     wrap.classList.toggle('is-graph', Tree.isGraph);
     hint.textContent = Tree.isGraph
-      ? 'Drag a card to place it · scroll to zoom · dotted arrows are references, pink ones connections'
+      ? (Tree.showsEveryTopic
+          ? 'Every topic at once · ⊕ goes back to one field at a time'
+          : 'Select a field to open it · purple arrows are references, pink ones connections · ⊕ shows everything')
       : 'Drag to pan · scroll to zoom · click a card to inspect · pink cards are connected in from another tree';
     document.getElementById('relayoutBtn').disabled = !Tree.isGraph;
+
+    const expand = document.getElementById('expandAllBtn');
+    expand.classList.toggle('is-on', Tree.isGraph && Tree.showsEveryTopic);
+    expand.title = Tree.isGraph
+      ? (Tree.showsEveryTopic ? 'Back to one field at a time' : 'Show every topic at once')
+      : 'Expand all branches';
   }
 
   /* ---------------- data menu ---------------- */
@@ -1389,6 +1397,7 @@
         Views.setListSelection(id);
         Views.renderInspector(id);
       },
+
       /* Buttons on a card ask the app to do the work, so the tree stays a
          renderer and everything lands in one place. */
       onAction: (act, nodeId) => {
@@ -1438,7 +1447,10 @@
         else Tree.zoom(mode === 'in' ? 1.25 : 0.8);
       }));
 
-    document.getElementById('expandAllBtn').addEventListener('click', () => Tree.expandAll());
+    document.getElementById('expandAllBtn').addEventListener('click', () => {
+      Tree.expandAll();
+      syncCanvasMode();
+    });
 
     const refsBtn = document.getElementById('refsBtn');
     refsBtn.classList.toggle('is-on', Tree.showRefs);

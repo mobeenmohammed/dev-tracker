@@ -1552,19 +1552,49 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 
 /* ---------- References between topics ---------- */
 
+/* The edges are the content of a knowledge graph, so they have to be readable
+   without hunting. A dashed line at half opacity over a dark canvas was
+   neither: these are opaque, thicker, and laid over a casing in the canvas
+   colour so a crossing reads as one line passing under another rather than
+   as a smudge. */
+.link-casing {
+  fill: none;
+  stroke: var(--bg);
+  stroke-width: 6px;
+  stroke-linecap: round;
+  opacity: .95;
+  pointer-events: none;
+}
+
 .ref-link {
   fill: none;
   stroke: var(--st-proficient);
-  stroke-width: 1.4px;
-  stroke-dasharray: 5 4;
-  opacity: .55;
+  stroke-width: 2px;
+  stroke-dasharray: 7 5;
+  opacity: .9;
   transition: opacity .15s, stroke-width .15s;
 }
-.ref-link.is-hot { opacity: 1; stroke-width: 2.2px; }
-.ref-link.is-dimmed { opacity: .12; }
+.ref-link.is-hot { opacity: 1; stroke-width: 3px; }
+.ref-link.is-dimmed { opacity: .14; }
 
-.ref-arrow-head { fill: var(--st-proficient); opacity: .75; }
+.ref-arrow-head { fill: var(--st-proficient); opacity: 1; }
 .ref-arrow-head.is-hot { opacity: 1; }
+
+/* Where several relationships were folded onto one line because their real
+   ends are inside a folded field. */
+.edge-count circle {
+  fill: var(--bg-elev);
+  stroke: var(--st-proficient);
+  stroke-width: 1.5px;
+}
+.edge-count text {
+  font-size: 10px;
+  font-weight: 600;
+  fill: var(--st-proficient);
+  pointer-events: none;
+}
+.edge-count.is-connect circle { stroke: var(--connect); }
+.edge-count.is-connect text   { fill: var(--connect); }
 
 .ref-label {
   font-size: 10px;
@@ -1583,11 +1613,12 @@ body.is-resizing { cursor: col-resize; user-select: none; }
    the eye can tell "this branch was brought in" from "this branch grew here". */
 .link.is-connect {
   stroke: var(--connect);
-  stroke-width: 1.8px;
-  stroke-dasharray: 9 4;
+  stroke-width: 2.4px;
+  stroke-dasharray: 10 5;
+  opacity: .95;
 }
-.link.is-connect.is-hot { stroke: var(--connect); stroke-width: 2.4px; }
-.connect-arrow-head { fill: var(--connect); opacity: .85; }
+.link.is-connect.is-hot { stroke: var(--connect); stroke-width: 3.2px; opacity: 1; }
+.connect-arrow-head { fill: var(--connect); opacity: 1; }
 
 /* Borrowed cards read as visitors: outlined rather than filled, in the
    connection colour, so a glance at a tree says which parts are natively
