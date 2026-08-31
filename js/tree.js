@@ -50,13 +50,71 @@ const Tree = (() => {
      `id` is no longer unique within a render. `key` is: it carries the whole
      path down to this instance, and anything that has to tell two drawings of
      one topic apart uses it. */
+  /* Which topics have their children drawn.
+
+     A field with four branches of a dozen topics each is a wall a screen and a
+     half wide, and none of it is what you are looking at. So a tree opens the
+     way the All graph does: the field's own children are always there, and
+     below that only the branch you are working down. Selecting a topic opens
+     it; selecting somewhere else closes what you left.
+
+     The path is taken from the drawing rather than from parentage, so a topic
+     inside a connected branch opens the branch it was reached through rather
+     than the tree it really lives in. */
+  function drawnPathTo(root, targetId) {
+    if (!targetId) return [];
+    const walk = (node, path, seen) => {
+      if (node.id === targetId) return path;
+      if (seen.has(node.id)) return null;
+      const next = new Set(seen).add(node.id);
+      const below = [...Store.childrenOf(node.id),
+                     ...Store.connectedInto(node.id).map(b => b.node)];
+      for (const child of below) {
+        const found = walk(child, path.concat(child.id), next);
+        if (found) return found;
+      }
+      return null;
+    };
+    return walk(root, [root.id], new Set()) || [];
+  }
+
+  /* Opens every branch holding something the search matched, and says whether
+     this one held anything, so a branch with no hits stays shut. */
+  function openToMatches(node, opened, seen) {
+    if (seen.has(node.id)) return false;
+    seen.add(node.id);
+
+    const below = [...Store.childrenOf(node.id),
+                   ...Store.connectedInto(node.id).map(b => b.node)];
+    let holdsMatch = matches(node.name);
+    below.forEach(child => {
+      if (openToMatches(child, opened, seen)) holdsMatch = true;
+    });
+    if (holdsMatch) opened.add(node.id);
+    return holdsMatch;
+  }
+
   function buildHierarchy() {
+    const field = Store.byId(rootId);
+
+    /* Everything at once is the escape hatch; otherwise only the field and the
+       branch being worked down have their children drawn. */
+    const opened = new Set([field.id]);
+    if (!graphShowAll) {
+      drawnPathTo(field, selectedId).forEach(id => opened.add(id));
+      /* A search opens whatever branch the match is in, because a closed one
+         hiding the only hit looks exactly like no hit at all. */
+      if (query) openToMatches(field, opened, new Set());
+    }
+
     /* `path` is every topic id from the root down to this one. A topic already
        on that chain is not descended into again, so even a connection that
        somehow slipped past the store's loop check draws a finite tree rather
        than hanging the page. */
     const make = (node, depth, path, key, borrowed, connection) => {
-      const isCollapsed = collapsed.has(node.id);
+      const isCollapsed = graphShowAll
+        ? collapsed.has(node.id)
+        : !opened.has(node.id);
       const rawKids  = Store.childrenOf(node.id);
       const brought  = Store.connectedInto(node.id);
       const nextPath = new Set(path).add(node.id);
@@ -89,7 +147,6 @@ const Tree = (() => {
 
     /* setRoot only ever leaves a field that exists here, so this is a real
        topic every time it is called. */
-    const field = Store.byId(rootId);
     return make(field, 0, new Set(), field.id, false, null);
   }
 
@@ -638,6 +695,13 @@ const Tree = (() => {
      runs alongside a parent-child edge, and stops at the card's edge so the
      arrowhead is not hidden underneath it. */
   function refPath(from, to) {
+    /* In a tree the cards sit in rows, so a straight-ish line between two of
+       them runs behind everything in between and survives only in the gaps —
+       which reads as several short references rather than one long one. Over
+       the top instead, through the empty band above the row, where the whole
+       arc can be followed from one end to the other. */
+    if (!isGraphMode()) return refArc(from, to);
+
     const { ux, uy, dist } = unitBetween(from, to);
 
     const a = edgeOffset(from, ux, uy) + 5;
@@ -649,6 +713,20 @@ const Tree = (() => {
     const cx = (x1 + x2) / 2 - uy * bow;
     const cy = (y1 + y2) / 2 + ux * bow;
     return `M${x1},${y1}Q${cx},${cy} ${x2},${y2}`;
+  }
+
+  /* Leaves the top of one card, rises clear of both, and comes down onto the
+     top of the other. The further apart they are the higher it rises, so two
+     arcs over the same row do not lie on top of each other. */
+  function refArc(from, to) {
+    const x1 = from.x, y1 = from.y - from.h / 2 - 2;
+    const x2 = to.x,   y2 = to.y - to.h / 2 - 2;
+
+    const span = Math.abs(x2 - x1);
+    const lift = Math.min(190, 46 + span * 0.24);
+    const crest = Math.min(y1, y2) - lift;
+
+    return `M${x1},${y1}C${x1},${crest} ${x2},${crest} ${x2},${y2}`;
   }
 
   function activityOf(n) {
@@ -787,10 +865,17 @@ const Tree = (() => {
 
   /* Collapsed branches keep a count, so nothing disappears silently. */
   function foldControl(n) {
+    const drilling = !isGraphMode() && !graphShowAll;
     const badge = html('button', 'card-badge' + (n.hiddenKids ? '' : ' card-fold'));
     if (n.hiddenKids) {
       badge.textContent = '+' + n.hiddenKids;
-      badge.title = 'Expand ' + n.hiddenKids + ' hidden sub-topics';
+      badge.title = drilling
+        ? 'Open this branch — ' + n.hiddenKids + ' inside'
+        : 'Expand ' + n.hiddenKids + ' hidden sub-topics';
+    } else if (drilling) {
+      /* Nothing to fold by hand here: what is open is what you are working
+         down, and stepping out is selecting something else. */
+      badge.style.display = 'none';
     } else {
       badge.textContent = '\u2013';
       badge.title = 'Collapse this branch';
@@ -900,7 +985,9 @@ const Tree = (() => {
 
   function fit(padding = 60) {
     if (!layoutRoot || !gNodes) return;
-    const box = gNodes.getBBox();
+    /* The whole drawing, not just the cards: reference arcs rise above the top
+       row, and fitting to the cards alone would cut them off. */
+    const box = gViewport ? gViewport.getBBox() : gNodes.getBBox();
     const rect = svg.getBoundingClientRect();
     if (!box.width || !box.height || !rect.width) return;
 
@@ -995,6 +1082,10 @@ const Tree = (() => {
   function toggleCollapse(id) {
     if (!Store.byId(id)) return;
     if (!Store.childrenOf(id).length && !Store.connectedInto(id).length) return;
+    /* While the tree opens the branch being worked down, folding by hand is
+       not a separate idea: the badge on a closed branch opens it, which is
+       selecting it. Manual folds belong to the everything-at-once view. */
+    if (!isGraphMode() && !graphShowAll) { select(id); return; }
     collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
     render();
   }
@@ -1003,16 +1094,11 @@ const Tree = (() => {
      you are looking at is opened, it is the escape hatch: everything at once,
      and pressing it again goes back to the tidy view. */
   function expandAll() {
-    if (isGraphMode()) {
-      graphShowAll = !graphShowAll;
-      render();
-      fit();
-      return graphShowAll;
-    }
-    collapsed.clear();
+    graphShowAll = !graphShowAll;
+    if (graphShowAll) collapsed.clear();
     render();
     fit();
-    return false;
+    return graphShowAll;
   }
 
   function setQuery(q) { query = (q || '').trim().toLowerCase(); render(); }

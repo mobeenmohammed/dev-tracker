@@ -1012,14 +1012,16 @@
       ? (Tree.showsEveryTopic
           ? 'Every topic at once · ⊕ goes back to one field at a time'
           : 'Select a field to open it · purple arrows are references, pink ones connections · ⊕ shows everything')
-      : 'Drag to pan · scroll to zoom · click a card to inspect · pink cards are connected in from another tree';
+      : (Tree.showsEveryTopic
+          ? 'Every topic at once · ⊕ goes back to one branch at a time'
+          : 'Select a topic to open its branch · purple arcs are references · ⊕ shows the whole tree');
     document.getElementById('relayoutBtn').disabled = !Tree.isGraph;
 
     const expand = document.getElementById('expandAllBtn');
-    expand.classList.toggle('is-on', Tree.isGraph && Tree.showsEveryTopic);
-    expand.title = Tree.isGraph
-      ? (Tree.showsEveryTopic ? 'Back to one field at a time' : 'Show every topic at once')
-      : 'Expand all branches';
+    expand.classList.toggle('is-on', Tree.showsEveryTopic);
+    expand.title = Tree.showsEveryTopic
+      ? 'Back to one branch at a time'
+      : (Tree.isGraph ? 'Show every topic at once' : 'Open the whole tree');
   }
 
   /* ---------------- data menu ---------------- */

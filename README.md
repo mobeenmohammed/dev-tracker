@@ -124,6 +124,19 @@ on the canvas lays the whole thing out again.
 Positions are cached, so selecting a card or ticking something off never
 reshuffles the picture.
 
+#### One branch at a time
+
+A field with four branches of a dozen topics each is a wall a screen and a
+half wide, and none of it is what you are looking at. So a **tree** opens the
+way the graph does: the field's own branches are always there, and below that
+only the branch you are working down. Selecting a topic opens it, selecting
+somewhere else closes what you left, and the badge on a closed branch says how
+many are inside and opens it when clicked.
+
+Searching opens whatever branch the match is in — a closed one hiding the only
+hit looks exactly like no hit at all — and leaves the branches with no match
+shut. **⊕** opens the whole tree, and again to come back.
+
 #### One field at a time
 
 Every topic at once is a hairball, and a hairball is a picture of nothing. So
@@ -152,6 +165,13 @@ followed: opaque rather than faint, thick enough to trace, and laid over a
 another instead of the two dissolving into each other. Arrowheads stop at a
 card's real edge — a card is a wide rectangle, so a single radius left them
 buried underneath it.
+
+In a **tree** the cards sit in rows, so a straight line between two of them
+runs behind everything in between and survives only in the gaps — which reads
+as several short references rather than one long one. There, references arc
+**over the top** instead, through the empty band above the row, rising higher
+the further they reach so two arcs over the same row do not lie on each other.
+Fitting the view accounts for them, so an arc is never cropped off the top.
 
 ### References and prerequisites
 

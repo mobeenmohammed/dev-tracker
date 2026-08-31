@@ -63,17 +63,18 @@ const nodeLabel = el => {
 };
 const nodeNamed = name => treeNodes().find(el => nodeLabel(el).startsWith(name));
 // a card handles clicks on its own div; a radial node handles them on the <g>
-/* In the All graph only the open field's topics are drawn, so reaching a
-   sub-topic means opening its field first — which is what a person does, and
-   what the checks below exercise explicitly where it is the point. */
+/* Both views open only the branch being worked down, so reaching a sub-topic
+   means drilling to it — which is what a person does, and what the checks
+   below exercise explicitly where that is the point. */
 const clickNode = name => {
   let n = nodeNamed(name);
-  if (!n && Tree.isGraph) {
+  if (!n) {
     const target = Store.state.nodes.find(x => x.name.startsWith(name));
-    const field = target && Store.domainOf(target.id);
-    const fieldCard = field && nodeNamed(field.name);
-    if (fieldCard) {
-      click(fieldCard.querySelector('.card') || fieldCard);
+    if (target) {
+      Store.ancestorsOf(target.id).forEach(ancestor => {
+        const card = nodeNamed(ancestor.name);
+        if (card) click(card.querySelector('.card') || card);
+      });
       n = nodeNamed(name);
     }
   }
@@ -99,9 +100,13 @@ check('All is in graph mode', Tree.isGraph === true);
 
 /* ---------- 2. focusing one field ---------- */
 click(tabNamed('C++'));
-const cppCount = 1 + Store.descendantsOf('cpp').length;
+/* A tree opens the field and its own branches, and below that only what is
+   being worked down — a field with four deep branches is otherwise a wall. */
+const cppCount = 1 + Store.childrenOf('cpp').length;
 check('C++ tab becomes active', tabNamed('C++').classList.contains('is-active'));
 check('tree re-roots on C++', treeNodes().length === cppCount, `${treeNodes().length} vs ${cppCount}`);
+check('and starts with its own branches, not everything under them',
+      cppCount < 1 + Store.descendantsOf('cpp').length);
 check('other fields are gone', !nodeNamed('Mathematics'));
 check('C++ is the centre', !!nodeNamed('C++'));
 check('centre node is selectable', !!Store.byId(Tree.rootId), Tree.rootId);
@@ -113,7 +118,13 @@ const before = Store.state.nodes.length;
 click($('#addChildBtn'));
 check('sub-topic added inside the field', Store.state.nodes.length === before + 1);
 check('it lands under the right parent', Store.byId(Tree.selectedId).parentId === 'cpp-tooling');
-check('tree grew', treeNodes().length === cppCount + 1);
+/* Selecting Tooling opened it, so the tree is the field, its branches, and
+   what is inside the one being worked down. */
+const drilled = 1 + Store.childrenOf('cpp').length + Store.childrenOf('cpp-tooling').length;
+check('tree grew', treeNodes().length === drilled, `${treeNodes().length} vs ${drilled}`);
+check('and the branch being worked down is the one that opened',
+      !!nodeNamed('CMake') && !nodeNamed('RAII'),
+      treeNodes().map(nodeLabel).join(' | '));
 click($('#deleteBtn'));
 check('and can be removed again', Store.state.nodes.length === before);
 
@@ -1062,12 +1073,17 @@ check('the new field still exists', !!Store.byId(newFieldId));
 Store.addConnection('math-linalg', 'cpp');
 click(tabNamed('C++'));
 
-const borrowed = $$('#nodes .node.is-borrowed');
 const graftRoot = $$('#nodes .card.is-graft-root');
 const connectEdges = () => $$('#links .link.is-connect');
 const linalgBranch = 1 + Store.descendantsOf('math-linalg').length;
 
-check('the connected branch is drawn in this tree',
+check('the connected branch arrives as a branch of this tree',
+      $$('#nodes .node.is-borrowed').length === 1,
+      `${$$('#nodes .node.is-borrowed').length} borrowed`);
+/* And opens like any other branch when it is the one being worked down. */
+clickNode('Linear Algebra');
+const borrowed = $$('#nodes .node.is-borrowed');
+check('opening it brings what is inside with it',
       borrowed.length === linalgBranch, `${borrowed.length} borrowed vs ${linalgBranch} in the branch`);
 check('its sub-topics came with it', !!nodeNamed('Matrix Decompositions'));
 check('the branch head is marked as the connection',
@@ -1078,7 +1094,7 @@ check('and says where it came from',
 check('the connection edge is drawn in its own style',
       connectEdges().length === 1, `${connectEdges().length} connect edges`);
 check('the tree grew by exactly the borrowed branch',
-      treeNodes().length === 1 + Store.descendantsOf('cpp').length + linalgBranch,
+      treeNodes().length === 1 + Store.childrenOf('cpp').length + linalgBranch,
       `${treeNodes().length} cards`);
 
 /* The head of a borrowed branch is a taller card, so the row it sits in has to
@@ -1187,7 +1203,7 @@ check('and the topic is untouched', !!Store.byId('math-linalg'));
 
 click(tabNamed('C++'));
 check('the C++ tree is its own size again',
-      treeNodes().length === 1 + Store.descendantsOf('cpp').length, `${treeNodes().length} cards`);
+      treeNodes().length === 1 + Store.childrenOf('cpp').length, `${treeNodes().length} cards`);
 check('and no connection edge is left behind', connectEdges().length === 0);
 
 /* ---------- 11. many fields stay navigable ---------- */
@@ -1336,20 +1352,21 @@ Tree.setQuery('');
 
 /* ---------- 14. what the review turned up ---------- */
 
-/* A leaf with a branch connected into it shows a fold badge; clicking it used
-   to do nothing, because folding counted real sub-topics only. */
+/* A leaf with a branch connected into it counts that branch, so its badge
+   offers to open it — folding used to count real sub-topics only, and the
+   badge did nothing when clicked. */
 Store.addConnection('math-linalg', 'cpp-raii');     // RAII has no sub-topics
 click(tabNamed('C++'));
-const withGraft = treeNodes().length;
+clickNode('Core Language');                          // open the branch it is in
+const closedCount = treeNodes().length;
 const raiiFold = nodeNamed('RAII').querySelector('.card-badge');
-check('a leaf with a branch connected in offers to fold it',
-      !!raiiFold && raiiFold.style.display !== 'none');
+check('a leaf with a branch connected in says there is something inside',
+      !!raiiFold && raiiFold.style.display !== 'none' && /^\+/.test(raiiFold.textContent),
+      raiiFold ? raiiFold.textContent : 'no badge');
 click(raiiFold);
-check('and folding it actually hides the branch',
-      treeNodes().length < withGraft, `${treeNodes().length} vs ${withGraft}`);
-click(nodeNamed('RAII').querySelector('.card-badge'));
-check('unfolding brings it back', treeNodes().length === withGraft,
-      `${treeNodes().length} vs ${withGraft}`);
+check('and its badge opens that branch',
+      treeNodes().length > closedCount, `${treeNodes().length} vs ${closedCount}`);
+check('which is what got selected', Tree.selectedId === 'cpp-raii', String(Tree.selectedId));
 
 /* Following a borrowed card must land on the topic, not be dragged back out
    to the whole tree by the fit that changing view schedules a frame later. */
@@ -2264,6 +2281,85 @@ click($('#expandAllBtn'));
 check('pressing it again goes back to one field at a time',
       treeNodes().length < Store.state.nodes.length, `${treeNodes().length} cards`);
 
+Store.state.links.slice().forEach(l => Store.deleteLink(l.id));
+Tree.render();
+
+/* ---------- 24. a tree opens the branch you are working down ---------- */
+
+click(tabNamed('C++'));
+Tree.select(null);
+Tree.setQuery('');
+const shown = () => treeNodes().map(nodeLabel);
+
+check('it starts as the field and its own branches',
+      shown().length === 1 + Store.childrenOf('cpp').length, shown().join(' | '));
+check('nothing deeper than that', !shown().includes('RAII & Smart Pointers'),
+      shown().join(' | '));
+
+clickNode('Core Language');
+check('selecting a branch opens it', shown().includes('RAII & Smart Pointers'),
+      shown().join(' | '));
+check('and the other branches stay shut', !shown().includes('CMake'), shown().join(' | '));
+
+clickNode('Tooling');
+check('selecting another closes the first', !shown().includes('RAII & Smart Pointers'),
+      shown().join(' | '));
+check('and opens the new one', shown().includes('CMake'), shown().join(' | '));
+
+Tree.select(null);
+check('deselecting closes back to the branches',
+      shown().length === 1 + Store.childrenOf('cpp').length, shown().join(' | '));
+
+/* The badge says what is inside a closed branch, and opens it. */
+const toolingBadge = () => nodeNamed('Tooling').querySelector('.card-badge');
+check('a closed branch says how much is inside',
+      /^\+\d/.test(toolingBadge().textContent), toolingBadge().textContent);
+click(toolingBadge());
+check('and its badge opens it', shown().includes('CMake'), shown().join(' | '));
+check('an open branch offers no fold-by-hand here',
+      nodeNamed('Tooling').querySelector('.card-badge').style.display === 'none',
+      nodeNamed('Tooling').querySelector('.card-badge').textContent);
+
+/* Searching opens whatever branch the match is in. */
+Tree.select(null);
+/* Whatever is still alive two levels down at this point, so the check is
+   about searching rather than about which fixtures earlier sections left. */
+const deepOne = Store.childrenOf('cpp-tooling')[0];
+Tree.setQuery(deepOne.name.slice(0, 5).toLowerCase());
+check('a search opens the branch holding the match',
+      shown().includes(deepOne.name), `${deepOne.name} — ` + shown().join(' | '));
+check('and leaves the branches with no match shut',
+      !shown().includes('RAII & Smart Pointers'), shown().join(' | '));
+Tree.setQuery('');
+
+/* And everything at once is still one button away. */
+click($('#expandAllBtn'));
+check('the expand button opens the whole tree',
+      treeNodes().length === 1 + Store.descendantsOf('cpp').length,
+      `${treeNodes().length} cards`);
+click($('#expandAllBtn'));
+check('and closes it back down',
+      treeNodes().length === 1 + Store.childrenOf('cpp').length,
+      `${treeNodes().length} cards`);
+
+/* A reference between two cards on the same row has to be followable, not
+   hidden behind whatever sits between them. */
+Store.state.links.slice().forEach(l => Store.deleteLink(l.id));
+Store.addLink('cpp-core', 'cpp-tooling', 'both needed');
+Tree.render();
+const arc = $('#links .ref-link');
+check('a reference in a tree is drawn', !!arc);
+check('it arcs clear of the row rather than running behind it',
+      (() => {
+        const d = arc.getAttribute('d');
+        const ys = [...d.matchAll(/-?[\d.]+,(-?[\d.]+)/g)].map(m => Number(m[1]));
+        const cards = $$('#nodes foreignObject')
+          .map(f => ({ y: +f.getAttribute('y'), h: +f.getAttribute('height') }));
+        const rowTop = Math.min(...cards.filter(c => c.y > 0).map(c => c.y));
+        /* Its highest point must be above the top of the row it spans. */
+        return Math.min(...ys) < rowTop;
+      })(), arc.getAttribute('d'));
+check('and it is laid over a casing', $$('#links .link-casing.is-ref').length >= 1);
 Store.state.links.slice().forEach(l => Store.deleteLink(l.id));
 Tree.render();
 
