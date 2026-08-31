@@ -1358,13 +1358,7 @@ const Views = (() => {
     ring.style.setProperty('--pct', Math.round(summary.ratio * 100));
     ring.innerHTML = `<span>${summary.total ? Math.round(summary.ratio * 100) + '%' : '&mdash;'}</span>`;
 
-    /* the topic picker mirrors the tree, indented so the shape is visible */
-    const picker = document.getElementById('focusTopic');
-    const keep = picker.value;
-    picker.innerHTML = '<option value="">No topic</option>' +
-      Store.state.nodes.map(n =>
-        `<option value="${esc(n.id)}">${'&nbsp;&nbsp;'.repeat(Store.depthOf(n.id))}${esc(n.name)}</option>`).join('');
-    picker.value = Store.byId(keep) ? keep : '';
+    renderTopicPick(currentTopicPick());
 
     const list = document.getElementById('focusList');
     const tasks = Store.focusFor(today);
@@ -1496,10 +1490,61 @@ const Views = (() => {
     });
   }
 
+  /* --- picking a topic for a task, in two steps ---
+
+     One select holding every topic in the tree gets long and reads as a wall.
+     The field comes first, grouped by the folders it is filed on, and the part
+     of it comes second — and only when there is a part to pick, so a field
+     with no sub-topics shows one control rather than two. */
+
+  /* Whichever is more specific: the part, or the field it is in. */
+  function currentTopicPick() {
+    const part = document.getElementById('focusSubTopic');
+    const field = document.getElementById('focusTopic');
+    if (part && !part.hidden && part.value) return part.value;
+    return field.value || null;
+  }
+
+  function renderTopicPick(nodeId) {
+    const field = document.getElementById('focusTopic');
+    const part = document.getElementById('focusSubTopic');
+
+    const node = nodeId ? Store.byId(nodeId) : null;
+    const home = node ? Store.domainOf(node.id) : null;
+
+    /* Folders group the fields exactly as they do everywhere else. Nesting is
+       written into the label rather than nested further, because a select
+       cannot nest groups and "Mathematics / Pure" says the same thing. */
+    const optionFor = f =>
+      `<option value="${esc(f.id)}">${esc(f.name)}</option>`;
+    const groups = Store.foldersInOrder().map(folder => {
+      const fields = Store.fieldsOn(folder.id);
+      if (!fields.length) return '';
+      const path = [...Store.folderAncestors(folder.id)].reverse()
+        .concat(folder).map(f => f.name).join(' / ');
+      return `<optgroup label="${esc(path)}">${fields.map(optionFor).join('')}</optgroup>`;
+    }).join('');
+    const loose = Store.fieldsOn(null).map(optionFor).join('');
+
+    field.innerHTML = '<option value="">No topic</option>' + groups + loose;
+    field.value = home ? home.id : '';
+
+    /* The second step is only worth showing when the field has parts. */
+    const parts = home ? Store.descendantsOf(home.id) : [];
+    part.hidden = !parts.length;
+    if (!parts.length) { part.innerHTML = ''; return; }
+
+    part.innerHTML =
+      `<option value="">Anywhere in ${esc(home.name)}</option>` +
+      parts.map(n =>
+        `<option value="${esc(n.id)}">` +
+        `${'&nbsp;&nbsp;'.repeat(Store.depthOf(n.id) - 1)}${esc(n.name)}</option>`).join('');
+    part.value = node && node.id !== home.id ? node.id : '';
+  }
+
   function submitFocusTask() {
     const input = document.getElementById('focusText');
-    const topic = document.getElementById('focusTopic');
-    const task = Store.addTask({ text: input.value, nodeId: topic.value || null });
+    const task = Store.addTask({ text: input.value, nodeId: currentTopicPick() });
     if (!task) return false;
     input.value = '';
     renderFocus();
@@ -1702,7 +1747,7 @@ const Views = (() => {
 
   return {
     init, renderInspector, renderList, renderStats, renderLegend, renderFocus,
-    fillListFilters, collapseAllGroups, submitFocusTask, formatHours,
+    fillListFilters, collapseAllGroups, submitFocusTask, renderTopicPick, formatHours,
     renderGoals, submitGoal,
     setListSelection(id) { listSelectedId = id; },
   };

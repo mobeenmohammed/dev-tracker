@@ -28,6 +28,13 @@ with **Focus**, **List** and **Stats** always pinned on the right.
 - **Focus** — goals with a target date, and a checklist for today: what you intend to work on, ticked off as
   you go. Every past day is kept, so it becomes a record of intentions rather
   than a list that resets. Unfinished work can be carried forward in one click.
+
+  A task can be filed against a topic, in two steps rather than one long list:
+  the **field** first, grouped by the folders it is filed on, and then the
+  **part of it** — and the second only appears once a field with parts is
+  chosen, so most of the time it is one control. Picking only a field files the
+  task against the field as a whole, and *No topic* is still the first choice,
+  for the things that are not about any of it.
 - **List** — every topic as a filterable, sortable, foldable list. Selecting a
   row opens an inline editor for notes, a quick time log, and sub-topics,
   without leaving the list.

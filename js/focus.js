@@ -167,7 +167,7 @@ const Focus = (() => {
       intent.value = timer.intent;
     }
 
-    $('focusTopic').textContent = node ? node.name : 'a topic that is gone';
+    $('focusSessionTopic').textContent = node ? node.name : 'a topic that is gone';
     const field = node ? Store.domainOf(node.id) : null;
     $('focusWhere').textContent = field && field.id !== timer.nodeId ? `in ${field.name}` : '';
 

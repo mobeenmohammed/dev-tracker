@@ -106,6 +106,20 @@ check('and what is inside a folder is marked as nested',
 check('the indent rail can be positioned against the row',
       probeRow('picker-row').position === 'relative');
 
+/* Every id has to be unique, or getElementById quietly hands back the wrong
+   element. The stopwatch's heading and the task view's topic select were both
+   called focusTopic, so the heading won and the picker was never filled —
+   every task could only ever be "No topic". */
+{
+  const seen = new Set();
+  const dupes = [];
+  [...doc.querySelectorAll('[id]')].forEach(el => {
+    if (seen.has(el.id)) dupes.push(el.id);
+    seen.add(el.id);
+  });
+  check('no two elements share an id', dupes.length === 0, dupes.join(', '));
+}
+
 /* The focus screen covers the app on purpose, so it has to be genuinely out of
    the way when it is not up — and it must start that way. */
 check('the focus screen starts hidden', doc.querySelector('#focusScreen').hasAttribute('hidden'));

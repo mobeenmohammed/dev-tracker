@@ -88,12 +88,12 @@
 <!-- The focus screen. Over everything, because focusing on one topic is what
      it is for, and dismissable without stopping the clock. -->
 <div id="focusScreen" class="focus-screen" role="dialog" aria-modal="true"
-     aria-labelledby="focusTopic" hidden>
+     aria-labelledby="focusSessionTopic" hidden>
   <div class="focus-panel">
     <div class="focus-head">
       <div>
         <p class="focus-eyebrow">Focusing on</p>
-        <h2 id="focusTopic"></h2>
+        <h2 id="focusSessionTopic"></h2>
         <p id="focusWhere" class="focus-where muted"></p>
       </div>
       <button id="focusClose" class="btn btn-icon" title="Leave this open in the background (Esc)"
@@ -248,9 +248,13 @@
 
       <form id="focusForm" class="focus-form">
         <input type="text" id="focusText" placeholder="What are you focusing on today?" autocomplete="off" aria-label="New task">
-        <select id="focusTopic" aria-label="Link to a topic">
+        <!-- Two steps rather than one long list: the field first, grouped by
+             folder, then the part of it — and the second only appears once
+             there is a field with parts to narrow down to. -->
+        <select id="focusTopic" aria-label="Field this task is about">
           <option value="">No topic</option>
         </select>
+        <select id="focusSubTopic" aria-label="Part of that field" hidden></select>
         <button class="btn btn-primary" type="submit">Add</button>
       </form>
 

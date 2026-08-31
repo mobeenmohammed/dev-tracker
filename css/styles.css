@@ -1111,9 +1111,12 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 }
 .focus-ring span { position: relative; z-index: 1; }
 
-.focus-form { display: flex; gap: 8px; margin-bottom: 14px; }
-.focus-form input { flex: 1; }
-.focus-form select { width: 165px; flex: none; }
+/* The row wraps rather than squeezing: on a narrow panel the two topic
+   selects drop to their own line instead of shrinking to nothing. */
+.focus-form { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.focus-form input { flex: 1 1 220px; min-width: 0; }
+.focus-form select { flex: 1 1 150px; min-width: 0; max-width: 200px; }
+.focus-form button { flex: none; }
 
 .focus-list { display: grid; gap: 3px; }
 

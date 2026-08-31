@@ -1476,6 +1476,12 @@
       Views.submitFocusTask();
     });
 
+    /* Choosing a field offers its parts; choosing another field offers that
+       one's instead, rather than leaving a part from the last one behind. */
+    document.getElementById('focusTopic').addEventListener('change', ev => {
+      Views.renderTopicPick(ev.target.value || null);
+    });
+
     document.getElementById('goalForm').addEventListener('submit', ev => {
       ev.preventDefault();
       Views.submitGoal();

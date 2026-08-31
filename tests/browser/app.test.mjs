@@ -431,9 +431,20 @@ check('history shows earlier days', $$('#focusHistory .day-group').length === 2,
 check('a past day shows its score', $('#focusHistory .day-score').textContent === '1/2',
       $('#focusHistory .day-score').textContent);
 
-// add a task for today, linked to a topic
+// add a task for today, linked to a topic — the field first, then the part
 $('#focusText').value = 'Finish the MPI collectives exercises';
-$('#focusTopic').value = 'hpc-mpi';
+check('the field list is grouped, not one long tree',
+      $$('#focusTopic option').every(o => !o.value || Store.byId(o.value).parentId === null),
+      $$('#focusTopic option').map(o => o.value).join(','));
+check('the second step waits for a field', $('#focusSubTopic').hidden);
+
+$('#focusTopic').value = 'hpc';
+fire($('#focusTopic'), 'change');
+check('picking a field offers its parts', !$('#focusSubTopic').hidden);
+check('starting with the field as a whole',
+      $('#focusSubTopic').value === '' && /Anywhere in/.test($('#focusSubTopic').options[0].textContent),
+      $('#focusSubTopic').options[0].textContent);
+$('#focusSubTopic').value = 'hpc-mpi';
 $('#focusForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 check('task added for today', Store.focusFor(Store.todayISO()).length === 1);
 check('task row rendered', $$('#focusList .task').length === 1);
@@ -1800,8 +1811,8 @@ check('the manual form is still there for backfilling', !!$('#sessionForm'));
 /* Starting from the inspector opens the screen. */
 click($('#focusBtn'));
 check('the focus screen opens', !$('#focusScreen').hidden);
-check('it names the topic', $('#focusTopic').textContent === 'CMake',
-      $('#focusTopic').textContent);
+check('it names the topic', $('#focusSessionTopic').textContent === 'CMake',
+      $('#focusSessionTopic').textContent);
 check('the clock is running', !!Store.activeFocus() && Store.activeFocus().startedAt !== null);
 check('and it says so', $('#focusState').textContent === 'running', $('#focusState').textContent);
 check('the button offers to pause', $('#focusToggle').textContent === 'Pause',
@@ -2085,6 +2096,72 @@ click(doc.body);
 Store.deleteFolder(innerF.id);
 Store.deleteFolder(shelfF.id);
 click(tabNamed('All'));
+
+/* ---------- 22. picking a topic for a task, in two steps ---------- */
+
+click($$('.tab-fixed').find(t => t.dataset.view === 'focus'));
+check('the picker lists the fields',
+      $$('#focusTopic option').length > 1,
+      `${$$('#focusTopic option').length} options`);
+
+/* Folders group the fields, the way they do everywhere else. */
+const taskFolder = Store.addFolder('Sciences');
+const taskInner = Store.addFolder('Physical', taskFolder.id);
+Store.setNodeFolder('hpc', taskInner.id);
+window.Views.renderFocus();
+
+const groupLabels = () => $$('#focusTopic optgroup').map(g => g.getAttribute('label'));
+check('a folder becomes a group', groupLabels().includes('Sciences / Physical'),
+      groupLabels().join(' | '));
+check('written as a path rather than nested, which a select cannot do',
+      groupLabels().every(l => !/^\s/.test(l)), groupLabels().join(' | '));
+check('the field is inside its group',
+      $('#focusTopic optgroup[label="Sciences / Physical"] option').value === 'hpc',
+      $('#focusTopic optgroup[label="Sciences / Physical"] option').value);
+check('fields on no folder are still listed',
+      $$('#focusTopic > option').some(o => o.value === 'cpp'),
+      $$('#focusTopic > option').map(o => o.value).join(','));
+
+/* A field with no parts shows one control, not two. */
+const bare = Store.addNode({ parentId: null, name: 'Bare Field' });
+window.Views.renderFocus();
+$('#focusTopic').value = bare.id;
+fire($('#focusTopic'), 'change');
+check('a field with nothing under it offers no second step',
+      $('#focusSubTopic').hidden);
+
+/* Switching field replaces the parts rather than leaving the old ones. */
+$('#focusTopic').value = 'hpc';
+fire($('#focusTopic'), 'change');
+const partsFor = () => $$('#focusSubTopic option').map(o => o.value).filter(Boolean);
+check('the parts are the ones in that field',
+      partsFor().every(id => Store.domainOf(id).id === 'hpc'), partsFor().join(','));
+$('#focusTopic').value = 'cpp';
+fire($('#focusTopic'), 'change');
+check('switching field swaps them out',
+      partsFor().every(id => Store.domainOf(id).id === 'cpp'), partsFor().join(','));
+check('and falls back to the field as a whole', $('#focusSubTopic').value === '');
+
+/* Choosing only a field files the task against the field itself. */
+$('#focusText').value = 'Read around C++ generally';
+$('#focusForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+const wholeField = Store.focusFor(Store.todayISO()).find(t => /Read around/.test(t.text));
+check('a task can be filed against a whole field', wholeField && wholeField.nodeId === 'cpp',
+      wholeField && wholeField.nodeId);
+
+/* And a task about nothing in particular still needs no topic at all. */
+$('#focusText').value = 'Career coach meeting';
+$('#focusTopic').value = '';
+fire($('#focusTopic'), 'change');
+check('no topic is still the first choice', $('#focusSubTopic').hidden);
+$('#focusForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+const noTopic = Store.focusFor(Store.todayISO()).find(t => /Career coach/.test(t.text));
+check('a task with no topic is fine', noTopic && noTopic.nodeId === null,
+      noTopic && noTopic.nodeId);
+
+Store.deleteNode(bare.id);
+Store.deleteFolder(taskInner.id);
+Store.deleteFolder(taskFolder.id);
 
 if (errors.length) {
   console.log('--- runtime errors ---');
