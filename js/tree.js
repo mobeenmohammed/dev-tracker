@@ -81,8 +81,12 @@ const Tree = (() => {
   /* Opens every branch holding something the search matched, and says whether
      this one held anything, so a branch with no hits stays shut. */
   function openToMatches(node, opened, seen) {
-    if (seen.has(node.id)) return false;
-    seen.add(node.id);
+    /* The answer is remembered rather than the visit: a branch reached twice —
+       a connected one can be — would otherwise be told "no match" the second
+       time and the branch holding it would stay shut. The false written on the
+       way in is what stops a loop. */
+    if (seen.has(node.id)) return seen.get(node.id);
+    seen.set(node.id, false);
 
     const below = [...Store.childrenOf(node.id),
                    ...Store.connectedInto(node.id).map(b => b.node)];
@@ -91,6 +95,7 @@ const Tree = (() => {
       if (openToMatches(child, opened, seen)) holdsMatch = true;
     });
     if (holdsMatch) opened.add(node.id);
+    seen.set(node.id, holdsMatch);
     return holdsMatch;
   }
 
@@ -104,7 +109,7 @@ const Tree = (() => {
       drawnPathTo(field, selectedId).forEach(id => opened.add(id));
       /* A search opens whatever branch the match is in, because a closed one
          hiding the only hit looks exactly like no hit at all. */
-      if (query) openToMatches(field, opened, new Set());
+      if (query) openToMatches(field, opened, new Map());
     }
 
     /* `path` is every topic id from the root down to this one. A topic already
@@ -595,7 +600,7 @@ const Tree = (() => {
       const path = el('path', { class: cls.join(' '), d });
       if (arrowed) path.setAttribute('marker-end', 'url(#connect-arrow)');
       gLinks.appendChild(path);
-      if (edge.count > 1) gLinks.appendChild(edgeCount(from, to, edge.count, 'connect'));
+      if (edge.count > 1) gLinks.appendChild(edgeCount(pathMidpoint(d), edge.count, 'connect'));
     });
 
     if (showRefs) drawReferences(byId, isDim, drawn.refs);
@@ -635,15 +640,34 @@ const Tree = (() => {
   /* A small number where several relationships were folded into one line, so
      "these two fields are related" carries how related without drawing four
      lines on top of each other. */
-  function edgeCount(from, to, count, kind) {
+  function edgeCount(at, count, kind) {
     const g = el('g', { class: 'edge-count is-' + kind });
-    const x = (from.x + to.x) / 2;
-    const y = (from.y + to.y) / 2;
-    g.appendChild(el('circle', { cx: x, cy: y, r: 9 }));
-    const text = el('text', { x, y: y + 3.5, 'text-anchor': 'middle' });
+    g.appendChild(el('circle', { cx: at.x, cy: at.y, r: 9 }));
+    const text = el('text', { x: at.x, y: at.y + 3.5, 'text-anchor': 'middle' });
     text.textContent = count;
     g.appendChild(text);
     return g;
+  }
+
+  /* Halfway along the curve rather than halfway between the two cards. A
+     bowed reference passes well off the straight line between them, and a
+     count floating beside the line it belongs to is worse than none. */
+  function pathMidpoint(d) {
+    const nums = [...d.matchAll(/(-?[\d.]+),(-?[\d.]+)/g)]
+      .map(m => ({ x: Number(m[1]), y: Number(m[2]) }));
+    if (nums.length === 3) {          // M start Q control end
+      const [a, c, b] = nums;
+      return { x: 0.25 * a.x + 0.5 * c.x + 0.25 * b.x,
+               y: 0.25 * a.y + 0.5 * c.y + 0.25 * b.y };
+    }
+    if (nums.length === 4) {          // M start C c1 c2 end
+      const [a, c1, c2, b] = nums;
+      return { x: (a.x + 3 * c1.x + 3 * c2.x + b.x) / 8,
+               y: (a.y + 3 * c1.y + 3 * c2.y + b.y) / 8 };
+    }
+    const first = nums[0] || { x: 0, y: 0 };
+    const last = nums[nums.length - 1] || first;
+    return { x: (first.x + last.x) / 2, y: (first.y + last.y) / 2 };
   }
 
   /* In a tree every reference is drawn as it is. In the graph they arrive
@@ -676,7 +700,7 @@ const Tree = (() => {
         'marker-end': touches ? 'url(#ref-arrow-hot)' : 'url(#ref-arrow)',
       }));
 
-      if (ref.count > 1) { gLinks.appendChild(edgeCount(from, to, ref.count, 'ref')); return; }
+      if (ref.count > 1) { gLinks.appendChild(edgeCount(pathMidpoint(d), ref.count, 'ref')); return; }
 
       if (ref.label && touches) {
         const label = el('text', {
@@ -726,7 +750,12 @@ const Tree = (() => {
     const lift = Math.min(190, 46 + span * 0.24);
     const crest = Math.min(y1, y2) - lift;
 
-    return `M${x1},${y1}C${x1},${crest} ${x2},${crest} ${x2},${y2}`;
+    /* Two cards nearly above one another have nothing to arc across, and the
+       curve would run straight up and straight back down over itself. It is
+       bowed out to one side by as much as the horizontal span is lacking. */
+    const swing = Math.max(0, 96 - span) * (x2 >= x1 ? 1 : -1);
+
+    return `M${x1},${y1}C${x1 + swing},${crest} ${x2 + swing},${crest} ${x2},${y2}`;
   }
 
   function activityOf(n) {

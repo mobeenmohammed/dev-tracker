@@ -2259,6 +2259,19 @@ check('they fold into one line while both fields are folded',
       refEnds() === 1, `${refEnds()} lines`);
 check('and it says how many', $('#links .edge-count text').textContent === String(foldedLinks),
       $('#links .edge-count') ? $('#links .edge-count text').textContent : 'no count drawn');
+/* On the curve, not beside it: a bowed reference passes well off the straight
+   line between the two cards. */
+check('the count sits on the line it belongs to',
+      (() => {
+        const d = $('#links .ref-link').getAttribute('d');
+        const pts = [...d.matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map(m => [+m[1], +m[2]]);
+        const [a, c, b] = pts;
+        const on = { x: 0.25 * a[0] + 0.5 * c[0] + 0.25 * b[0],
+                     y: 0.25 * a[1] + 0.5 * c[1] + 0.25 * b[1] };
+        const circle = $('#links .edge-count circle');
+        return Math.hypot(+circle.getAttribute('cx') - on.x,
+                          +circle.getAttribute('cy') - on.y) < 2;
+      })(), 'the count is not on its curve');
 
 clickNode('High Performance Computing');
 check('opening a field resolves them into separate lines', refEnds() === foldedLinks,
@@ -2361,6 +2374,36 @@ check('it arcs clear of the row rather than running behind it',
       })(), arc.getAttribute('d'));
 check('and it is laid over a casing', $$('#links .link-casing.is-ref').length >= 1);
 Store.state.links.slice().forEach(l => Store.deleteLink(l.id));
+Tree.render();
+
+/* A reference between two cards stacked almost vertically had nothing to arc
+   across, so it ran straight up and straight back down over itself. */
+Store.state.links.slice().forEach(l => Store.deleteLink(l.id));
+click(tabNamed('C++'));
+/* An only child sits exactly under its parent, which is the case with no
+   horizontal span at all to arc across. */
+const stackParent = Store.addNode({ parentId: 'cpp', name: 'Stacked Parent' });
+const stackChild = Store.addNode({ parentId: stackParent.id, name: 'Stacked Child' });
+Tree.select(null);
+clickNode('Stacked Parent');
+Store.addLink(stackParent.id, stackChild.id, 'a step down');
+Tree.render();
+check('the two really are stacked',
+      (() => {
+        const box = name => nodeNamed(name).querySelector('foreignObject');
+        return Math.abs(+box('Stacked Parent').getAttribute('x')
+                      - +box('Stacked Child').getAttribute('x')) < 20;
+      })(), 'they are not above one another');
+check('a reference between stacked cards is drawn', !!$('#links .ref-link'));
+check('and bows out to the side rather than folding on itself',
+      (() => {
+        const d = $('#links .ref-link').getAttribute('d');
+        const xs = [...d.matchAll(/(-?[\d.]+),-?[\d.]+/g)].map(m => Number(m[1]));
+        return Math.max(...xs) - Math.min(...xs) > 40;
+      })(), $('#links .ref-link').getAttribute('d'));
+Store.state.links.slice().forEach(l => Store.deleteLink(l.id));
+Store.deleteNode(stackParent.id);
+Tree.select(null);
 Tree.render();
 
 if (errors.length) {
