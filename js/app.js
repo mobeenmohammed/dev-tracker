@@ -1010,18 +1010,18 @@
     wrap.classList.toggle('is-graph', Tree.isGraph);
     hint.textContent = Tree.isGraph
       ? (Tree.showsEveryTopic
-          ? 'Every topic at once · ⊕ goes back to one field at a time'
-          : 'Select a field to open it · purple arrows are references, pink ones connections · ⊕ shows everything')
+          ? 'Every topic at once · ⊕ folds the fields back up'
+          : 'Click a field to open it, click it again to close · purple arrows are references, pink ones connections · ⊕ shows everything')
       : (Tree.showsEveryTopic
-          ? 'Every topic at once · ⊕ goes back to one branch at a time'
-          : 'Select a topic to open its branch · purple arcs are references · ⊕ shows the whole tree');
+          ? 'Every branch open, connections included · ⊕ restores your folds'
+          : 'The whole field is drawn · fold a connected branch with the + / – on its card');
     document.getElementById('relayoutBtn').disabled = !Tree.isGraph;
 
     const expand = document.getElementById('expandAllBtn');
     expand.classList.toggle('is-on', Tree.showsEveryTopic);
     expand.title = Tree.showsEveryTopic
-      ? 'Back to one branch at a time'
-      : (Tree.isGraph ? 'Show every topic at once' : 'Open the whole tree');
+      ? (Tree.isGraph ? 'Fold every field back up' : 'Back to your folds')
+      : (Tree.isGraph ? 'Show every topic at once' : 'Open every connected branch too');
   }
 
   /* ---------------- data menu ---------------- */

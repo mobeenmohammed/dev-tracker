@@ -63,9 +63,10 @@ const nodeLabel = el => {
 };
 const nodeNamed = name => treeNodes().find(el => nodeLabel(el).startsWith(name));
 // a card handles clicks on its own div; a radial node handles them on the <g>
-/* Both views open only the branch being worked down, so reaching a sub-topic
-   means drilling to it — which is what a person does, and what the checks
-   below exercise explicitly where that is the point. */
+/* A tree draws its field whole, but the All graph only draws the fields you
+   have opened, so reaching a sub-topic there means opening its field first —
+   which is what a person does, and what the checks below exercise explicitly
+   where that is the point. */
 const clickNode = name => {
   let n = nodeNamed(name);
   if (!n) {
@@ -100,13 +101,14 @@ check('All is in graph mode', Tree.isGraph === true);
 
 /* ---------- 2. focusing one field ---------- */
 click(tabNamed('C++'));
-/* A tree opens the field and its own branches, and below that only what is
-   being worked down — a field with four deep branches is otherwise a wall. */
-const cppCount = 1 + Store.childrenOf('cpp').length;
+/* A tree draws the field it is rooted on whole: its sub-topics are the thing
+   you came for, and having them fold under you as you read is worse than the
+   width. Only a branch borrowed from another field folds. */
+const cppCount = 1 + Store.descendantsOf('cpp').length;
 check('C++ tab becomes active', tabNamed('C++').classList.contains('is-active'));
 check('tree re-roots on C++', treeNodes().length === cppCount, `${treeNodes().length} vs ${cppCount}`);
-check('and starts with its own branches, not everything under them',
-      cppCount < 1 + Store.descendantsOf('cpp').length);
+check('and draws everything under it, not just the top branches',
+      cppCount > 1 + Store.childrenOf('cpp').length);
 check('other fields are gone', !nodeNamed('Mathematics'));
 check('C++ is the centre', !!nodeNamed('C++'));
 check('centre node is selectable', !!Store.byId(Tree.rootId), Tree.rootId);
@@ -118,12 +120,10 @@ const before = Store.state.nodes.length;
 click($('#addChildBtn'));
 check('sub-topic added inside the field', Store.state.nodes.length === before + 1);
 check('it lands under the right parent', Store.byId(Tree.selectedId).parentId === 'cpp-tooling');
-/* Selecting Tooling opened it, so the tree is the field, its branches, and
-   what is inside the one being worked down. */
-const drilled = 1 + Store.childrenOf('cpp').length + Store.childrenOf('cpp-tooling').length;
-check('tree grew', treeNodes().length === drilled, `${treeNodes().length} vs ${drilled}`);
-check('and the branch being worked down is the one that opened',
-      !!nodeNamed('CMake') && !nodeNamed('RAII'),
+check('tree grew by the one card', treeNodes().length === cppCount + 1,
+      `${treeNodes().length} vs ${cppCount + 1}`);
+check('and every other branch is still drawn beside it',
+      !!nodeNamed('CMake') && !!nodeNamed('RAII'),
       treeNodes().map(nodeLabel).join(' | '));
 click($('#deleteBtn'));
 check('and can be removed again', Store.state.nodes.length === before);
@@ -738,12 +738,25 @@ check('grouped by stage', /Applied/.test($('#appBoard .app-stage-head').textCont
 check('it opens for editing', !!$('.app-detail'));
 check('a timeline starts immediately', $$('.app-detail .tl-row').length === 1);
 
+/* The stage is what the row is about, so it is what the row is coloured by —
+   a single dot beside a company name was doing all of that work. */
+check('the row is coloured by the stage it is filed under',
+      $('#appBoard .app-row').classList.contains('stage-of-applied'),
+      $('#appBoard .app-row').className);
+check('and so is the panel that opens under it',
+      $('.app-detail').classList.contains('stage-of-applied'),
+      $('.app-detail').className);
+
 // move it through the pipeline
 const stageSel = $('#appBoard .app-stage');
 stageSel.value = 'interview';
 fire(stageSel, 'change');
 check('stage change applied', Store.applications()[0].stage === 'interview');
 check('and recorded on the timeline', Store.applications()[0].events.length === 2);
+check('the colour follows the stage rather than being painted once',
+      $('#appBoard .app-row').classList.contains('stage-of-interview')
+      && !$('#appBoard .app-row').classList.contains('stage-of-applied'),
+      $('#appBoard .app-row').className);
 
 // a next action that is overdue surfaces at the top
 const appId = Store.applications()[0].id;
@@ -1077,13 +1090,8 @@ const graftRoot = $$('#nodes .card.is-graft-root');
 const connectEdges = () => $$('#links .link.is-connect');
 const linalgBranch = 1 + Store.descendantsOf('math-linalg').length;
 
-check('the connected branch arrives as a branch of this tree',
-      $$('#nodes .node.is-borrowed').length === 1,
-      `${$$('#nodes .node.is-borrowed').length} borrowed`);
-/* And opens like any other branch when it is the one being worked down. */
-clickNode('Linear Algebra');
 const borrowed = $$('#nodes .node.is-borrowed');
-check('opening it brings what is inside with it',
+check('the connected branch arrives whole, without being asked twice',
       borrowed.length === linalgBranch, `${borrowed.length} borrowed vs ${linalgBranch} in the branch`);
 check('its sub-topics came with it', !!nodeNamed('Matrix Decompositions'));
 check('the branch head is marked as the connection',
@@ -1094,7 +1102,7 @@ check('and says where it came from',
 check('the connection edge is drawn in its own style',
       connectEdges().length === 1, `${connectEdges().length} connect edges`);
 check('the tree grew by exactly the borrowed branch',
-      treeNodes().length === 1 + Store.childrenOf('cpp').length + linalgBranch,
+      treeNodes().length === 1 + Store.descendantsOf('cpp').length + linalgBranch,
       `${treeNodes().length} cards`);
 
 /* The head of a borrowed branch is a taller card, so the row it sits in has to
@@ -1203,7 +1211,7 @@ check('and the topic is untouched', !!Store.byId('math-linalg'));
 
 click(tabNamed('C++'));
 check('the C++ tree is its own size again',
-      treeNodes().length === 1 + Store.childrenOf('cpp').length, `${treeNodes().length} cards`);
+      treeNodes().length === 1 + Store.descendantsOf('cpp').length, `${treeNodes().length} cards`);
 check('and no connection edge is left behind', connectEdges().length === 0);
 
 /* ---------- 11. many fields stay navigable ---------- */
@@ -1352,21 +1360,18 @@ Tree.setQuery('');
 
 /* ---------- 14. what the review turned up ---------- */
 
-/* A leaf with a branch connected into it counts that branch, so its badge
-   offers to open it — folding used to count real sub-topics only, and the
-   badge did nothing when clicked. */
+/* A leaf can have a branch connected into it, and that branch is drawn beneath
+   it like any other — folding used to count real sub-topics only, so a leaf's
+   borrowed branch had no fold badge and the one on screen did nothing. */
+const beforeLeafConn = treeNodes().length;
 Store.addConnection('math-linalg', 'cpp-raii');     // RAII has no sub-topics
 click(tabNamed('C++'));
-clickNode('Core Language');                          // open the branch it is in
-const closedCount = treeNodes().length;
-const raiiFold = nodeNamed('RAII').querySelector('.card-badge');
-check('a leaf with a branch connected in says there is something inside',
-      !!raiiFold && raiiFold.style.display !== 'none' && /^\+/.test(raiiFold.textContent),
-      raiiFold ? raiiFold.textContent : 'no badge');
-click(raiiFold);
-check('and its badge opens that branch',
-      treeNodes().length > closedCount, `${treeNodes().length} vs ${closedCount}`);
-check('which is what got selected', Tree.selectedId === 'cpp-raii', String(Tree.selectedId));
+check('a branch connected into a leaf is drawn under it',
+      treeNodes().length === beforeLeafConn + 1 + Store.descendantsOf('math-linalg').length,
+      `${treeNodes().length} vs ${beforeLeafConn} before`);
+check('and it is the borrowed head that carries the fold, not the leaf',
+      nodeNamed('RAII').querySelector('.card-badge').style.display === 'none',
+      nodeNamed('RAII').querySelector('.card-badge').textContent);
 
 /* Following a borrowed card must land on the topic, not be dragged back out
    to the whole tree by the fit that changing view schedules a frame later. */
@@ -1398,7 +1403,7 @@ click($('#deleteBtn'));
 check('the canvas knows it is a graph again',
       $('.canvas-wrap').classList.contains('is-graph'));
 check('the re-layout button works again', !$('#relayoutBtn').disabled);
-check('and the hint describes the graph', /Select a field/.test($('#canvasHint').textContent),
+check('and the hint describes the graph', /Click a field/.test($('#canvasHint').textContent),
       $('#canvasHint').textContent);
 
 /* ---------- 15. a failed save is put in front of you ---------- */
@@ -2200,7 +2205,7 @@ Store.deleteNode(bare.id);
 Store.deleteFolder(taskInner.id);
 Store.deleteFolder(taskFolder.id);
 
-/* ---------- 23. the All graph opens one field at a time ---------- */
+/* ---------- 23. the All graph opens the fields you click ---------- */
 
 click(tabNamed('All'));
 Tree.select(null);
@@ -2209,26 +2214,69 @@ Store.state.connections.slice().forEach(c => Store.deleteConnection(c.id));
 Tree.render();
 
 const cardNames = () => treeNodes().map(nodeLabel);
+/* Nothing shuts a field but pressing this, so it is also how the graph gets
+   back to a clean start after the earlier sections have opened things. */
+const foldEveryField = () => { click($('#expandAllBtn')); click($('#expandAllBtn')); };
+
+foldEveryField();
 check('it starts as the fields alone',
       cardNames().sort().join() === Store.roots().map(r => r.name).sort().join(),
       cardNames().join(' | '));
 
-/* Selecting a field unfolds it; selecting another folds the first away. */
 clickNode('High Performance Computing');
-check('selecting a field shows what is in it',
+check('clicking a field shows what is in it',
       cardNames().includes('OpenMP'), cardNames().join(' | '));
 check('and leaves the other fields folded',
       !cardNames().includes('Random Variables'), cardNames().join(' | '));
 
+/* Opening a second one is not a spotlight moving: both stay open, because
+   comparing two fields is the reason for having them side by side. */
 clickNode('Mathematics');
-check('selecting another folds the first back up',
-      !cardNames().includes('OpenMP'), cardNames().join(' | '));
-check('and opens the new one', cardNames().includes('Random Variables'), cardNames().join(' | '));
+check('opening another leaves the first open', cardNames().includes('OpenMP'),
+      cardNames().join(' | '));
+check('and opens the new one alongside it',
+      cardNames().includes('Random Variables'), cardNames().join(' | '));
 
+/* The same click closes it again. */
+clickNode('High Performance Computing');
+check('clicking an open field folds it back', !cardNames().includes('OpenMP'),
+      cardNames().join(' | '));
+check('and leaves the other one where it was',
+      cardNames().includes('Random Variables'), cardNames().join(' | '));
+
+/* Reading across the sub-topics of an open field must not shut it. */
+clickNode('Random Variables');
+check('selecting a sub-topic keeps its field open',
+      cardNames().includes('Common Distributions'), cardNames().join(' | '));
 Tree.select(null);
-check('deselecting folds everything back to the fields',
+check('and deselecting leaves it open too',
+      cardNames().includes('Random Variables'), cardNames().join(' | '));
+
+foldEveryField();
+check('folding every field back up is one button',
       cardNames().sort().join() === Store.roots().map(r => r.name).sort().join(),
       cardNames().join(' | '));
+
+/* The same fold is reachable from the inspector, and says which way it goes. */
+clickNode('Mathematics');
+check('the inspector offers to fold the field you opened',
+      $('#collapseBtn') && $('#collapseBtn').textContent === 'Collapse field',
+      $('#collapseBtn') ? $('#collapseBtn').textContent : 'no fold button');
+click($('#collapseBtn'));
+check('pressing it folds the field', !cardNames().includes('Random Variables'),
+      cardNames().join(' | '));
+check('and it now offers to open it again',
+      $('#collapseBtn').textContent === 'Expand field', $('#collapseBtn').textContent);
+click($('#collapseBtn'));
+check('which is what it does', cardNames().includes('Random Variables'),
+      cardNames().join(' | '));
+
+/* With every topic drawn there is nothing left to fold, so nothing is offered:
+   a button that cannot change what is on screen is worse than no button. */
+click($('#expandAllBtn'));
+check('and no fold is offered while every topic is drawn at once',
+      !$('#collapseBtn'), 'a fold button is on screen');
+click($('#expandAllBtn'));
 
 /* A relationship into a folded field is not lost: it is drawn to the field. */
 Store.addLink('math-prob', 'hpc-roofline', 'used for modelling');
@@ -2253,8 +2301,7 @@ const foldedLinks = Store.state.links.length;
 check('three separate relationships between the two fields', foldedLinks === 3,
       `${foldedLinks} links: ` + Store.state.links.map(l => l.from + '>' + l.to).join(','));
 
-Tree.select(null);
-Tree.render();
+foldEveryField();
 check('they fold into one line while both fields are folded',
       refEnds() === 1, `${refEnds()} lines`);
 check('and it says how many', $('#links .edge-count text').textContent === String(foldedLinks),
@@ -2291,69 +2338,99 @@ check('and says it is on', $('#expandAllBtn').classList.contains('is-on'));
 check('the hint says so too', /Every topic at once/.test($('#canvasHint').textContent),
       $('#canvasHint').textContent);
 click($('#expandAllBtn'));
-check('pressing it again goes back to one field at a time',
-      treeNodes().length < Store.state.nodes.length, `${treeNodes().length} cards`);
+check('pressing it again folds every field back up',
+      treeNodes().length === Store.roots().length, `${treeNodes().length} cards`);
 
 Store.state.links.slice().forEach(l => Store.deleteLink(l.id));
 Tree.render();
 
-/* ---------- 24. a tree opens the branch you are working down ---------- */
+/* ---------- 24. a tree draws its own field whole ---------- */
 
 click(tabNamed('C++'));
 Tree.select(null);
 Tree.setQuery('');
 const shown = () => treeNodes().map(nodeLabel);
+const ownTree = () => 1 + Store.descendantsOf('cpp').length;
 
-check('it starts as the field and its own branches',
-      shown().length === 1 + Store.childrenOf('cpp').length, shown().join(' | '));
-check('nothing deeper than that', !shown().includes('RAII & Smart Pointers'),
-      shown().join(' | '));
+check('the field is drawn in full', shown().length === ownTree(), shown().join(' | '));
+check('including what is two levels down',
+      shown().includes('RAII & Smart Pointers'), shown().join(' | '));
 
+/* Selecting is for reading a topic, not for rearranging the drawing: working
+   across three sub-topics in a row must leave the tree exactly as it was. */
 clickNode('Core Language');
-check('selecting a branch opens it', shown().includes('RAII & Smart Pointers'),
-      shown().join(' | '));
-check('and the other branches stay shut', !shown().includes('CMake'), shown().join(' | '));
-
+check('selecting a branch changes nothing about what is drawn',
+      shown().length === ownTree(), shown().join(' | '));
 clickNode('Tooling');
-check('selecting another closes the first', !shown().includes('RAII & Smart Pointers'),
+check('and selecting another leaves the first alone',
+      shown().includes('RAII & Smart Pointers') && shown().includes('CMake'),
       shown().join(' | '));
-check('and opens the new one', shown().includes('CMake'), shown().join(' | '));
-
 Tree.select(null);
-check('deselecting closes back to the branches',
-      shown().length === 1 + Store.childrenOf('cpp').length, shown().join(' | '));
+check('deselecting leaves it whole too', shown().length === ownTree(), shown().join(' | '));
 
-/* The badge says what is inside a closed branch, and opens it. */
-const toolingBadge = () => nodeNamed('Tooling').querySelector('.card-badge');
-check('a closed branch says how much is inside',
-      /^\+\d/.test(toolingBadge().textContent), toolingBadge().textContent);
-click(toolingBadge());
-check('and its badge opens it', shown().includes('CMake'), shown().join(' | '));
-check('an open branch offers no fold-by-hand here',
+check('a topic of this field offers no fold badge at all',
       nodeNamed('Tooling').querySelector('.card-badge').style.display === 'none',
       nodeNamed('Tooling').querySelector('.card-badge').textContent);
 
-/* Searching opens whatever branch the match is in. */
+/* A branch connected in from another field is the one thing that folds, and
+   the fold is a toggle that stays where you put it. */
+Store.addConnection('math-linalg', 'cpp-tooling');
+Tree.render();
+const linalgCards = 1 + Store.descendantsOf('math-linalg').length;
+check('a connected branch is drawn whole to begin with',
+      shown().length === ownTree() + linalgCards, shown().join(' | '));
+
+const graftBadge = () => nodeNamed('Linear Algebra').querySelector('.card-badge');
+check('its head is the card offering the fold', graftBadge().textContent === '–',
+      graftBadge().textContent);
+click(graftBadge());
+check('folding it takes the borrowed branch away',
+      shown().length === ownTree() + 1, shown().join(' | '));
+check('leaving the head behind, with a count',
+      /^\+\d/.test(graftBadge().textContent), graftBadge().textContent);
+
+/* This is the part that used to be annoying: looking at something else. */
+clickNode('Core Language');
+clickNode('RAII');
+check('reading elsewhere does not reopen what you folded',
+      shown().length === ownTree() + 1, shown().join(' | '));
+
+click(graftBadge());
+check('and the same badge brings it back',
+      shown().length === ownTree() + linalgCards, shown().join(' | '));
+
+/* The inspector says which way it will go, rather than always saying fold. */
+clickNode('Tooling');
+check('the inspector offers the fold where there is one',
+      $('#collapseBtn') && $('#collapseBtn').textContent === 'Fold connected branches',
+      $('#collapseBtn') ? $('#collapseBtn').textContent : 'no fold button');
+click($('#collapseBtn'));
+check('pressing it folds the branch', shown().length === ownTree() + 1, shown().join(' | '));
+check('and it now offers to bring it back',
+      $('#collapseBtn').textContent === 'Show connected branches',
+      $('#collapseBtn').textContent);
+
+/* A search must still reach into a folded branch, or a closed one hiding the
+   only hit looks exactly like no hit at all. */
 Tree.select(null);
-/* Whatever is still alive two levels down at this point, so the check is
-   about searching rather than about which fixtures earlier sections left. */
-const deepOne = Store.childrenOf('cpp-tooling')[0];
-Tree.setQuery(deepOne.name.slice(0, 5).toLowerCase());
-check('a search opens the branch holding the match',
-      shown().includes(deepOne.name), `${deepOne.name} — ` + shown().join(' | '));
-check('and leaves the branches with no match shut',
-      !shown().includes('RAII & Smart Pointers'), shown().join(' | '));
+Tree.setQuery('matrix');
+check('a search reopens the connected branch holding the match',
+      shown().includes('Matrix Decompositions'), shown().join(' | '));
 Tree.setQuery('');
+check('and it folds itself away again afterwards',
+      shown().length === ownTree() + 1, shown().join(' | '));
 
 /* And everything at once is still one button away. */
 click($('#expandAllBtn'));
-check('the expand button opens the whole tree',
-      treeNodes().length === 1 + Store.descendantsOf('cpp').length,
-      `${treeNodes().length} cards`);
+check('the expand button draws the folded branch too',
+      shown().length === ownTree() + linalgCards, shown().join(' | '));
 click($('#expandAllBtn'));
-check('and closes it back down',
-      treeNodes().length === 1 + Store.childrenOf('cpp').length,
-      `${treeNodes().length} cards`);
+check('and pressing it again gives your folds back',
+      shown().length === ownTree() + 1, shown().join(' | '));
+
+Store.state.connections.slice().forEach(c => Store.deleteConnection(c.id));
+Tree.select(null);
+Tree.render();
 
 /* A reference between two cards on the same row has to be followable, not
    hidden behind whatever sits between them. */

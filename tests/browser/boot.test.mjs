@@ -54,9 +54,9 @@ const check = (label, cond, detail = '') => {
   check('list view restored', !doc.getElementById('view-list').hidden);
   check('list tab marked active', [...doc.querySelectorAll('.tab-fixed')].find(t => t.dataset.view === 'list').classList.contains('is-active'));
   check('field tab restored', window.Tree.rootId === 'cpp', String(window.Tree.rootId));
-  /* A tree opens the field and its own branches, and drills from there. */
+  /* A tree draws the field it is rooted on whole. */
   check('tree rooted on that field',
-        doc.querySelectorAll('#nodes .node').length === 1 + window.Store.childrenOf('cpp').length,
+        doc.querySelectorAll('#nodes .node').length === 1 + window.Store.descendantsOf('cpp').length,
         `${doc.querySelectorAll('#nodes .node').length} cards`);
   check('activity toggle restored off', window.Tree.showActivity === false);
   check('no relative dates drawn', doc.querySelectorAll('#nodes .sub-label').length === 0);

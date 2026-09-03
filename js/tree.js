@@ -28,6 +28,15 @@ const Tree = (() => {
   let onSelect = () => {};
   let onAction = () => {};
   let collapsed = new Set();
+  /* Connected branches folded away by hand. A field's own tree is always
+     drawn in full — the only thing in it that folds is a branch borrowed from
+     somewhere else — and folding one is a toggle that stays put, so reading
+     across several sub-topics never closes what you left open. */
+  const closedGrafts = new Set();
+  /* Fields opened in the All graph, by hand and one click at a time. Opening
+     is a toggle as well: several fields can be open together, and none of
+     them closes because you went to look at another. */
+  const expandedFields = new Set();
   let selectedId = null;
   let query = '';
   let layoutRoot = null;
@@ -50,67 +59,51 @@ const Tree = (() => {
      `id` is no longer unique within a render. `key` is: it carries the whole
      path down to this instance, and anything that has to tell two drawings of
      one topic apart uses it. */
-  /* Which topics have their children drawn.
+  /* Which connected branches are folded away.
 
-     A field with four branches of a dozen topics each is a wall a screen and a
-     half wide, and none of it is what you are looking at. So a tree opens the
-     way the All graph does: the field's own children are always there, and
-     below that only the branch you are working down. Selecting a topic opens
-     it; selecting somewhere else closes what you left.
+     A field's own tree is drawn in full: its sub-topics are the thing you came
+     to the tree for, and having them open and close under you as you read
+     across them is worse than the width. What does fold is a branch borrowed
+     from another field, because that is a whole second tree arriving inside
+     this one — so those, and only those, carry a fold badge.
 
-     The path is taken from the drawing rather than from parentage, so a topic
-     inside a connected branch opens the branch it was reached through rather
-     than the tree it really lives in. */
-  function drawnPathTo(root, targetId) {
-    if (!targetId) return [];
-    const walk = (node, path, seen) => {
-      if (node.id === targetId) return path;
-      if (seen.has(node.id)) return null;
-      const next = new Set(seen).add(node.id);
-      const below = [...Store.childrenOf(node.id),
-                     ...Store.connectedInto(node.id).map(b => b.node)];
-      for (const child of below) {
-        const found = walk(child, path.concat(child.id), next);
-        if (found) return found;
-      }
-      return null;
-    };
-    return walk(root, [root.id], new Set()) || [];
+     Reopening is by hand and stays that way until you say otherwise. */
+  function foldedGrafts() {
+    if (graphShowAll) return new Set();
+    const folded = new Set(closedGrafts);
+    /* A search reopens whatever branch the match is in, because a folded one
+       hiding the only hit looks exactly like no hit at all. */
+    if (query) revealMatchingGrafts(Store.byId(rootId), folded, new Map());
+    return folded;
   }
 
-  /* Opens every branch holding something the search matched, and says whether
-     this one held anything, so a branch with no hits stays shut. */
-  function openToMatches(node, opened, seen) {
+  /* Unfolds every connected branch holding something the search matched, and
+     says whether this one held anything, so a branch with no hits stays shut. */
+  function revealMatchingGrafts(node, folded, seen) {
     /* The answer is remembered rather than the visit: a branch reached twice —
        a connected one can be — would otherwise be told "no match" the second
-       time and the branch holding it would stay shut. The false written on the
-       way in is what stops a loop. */
+       time and the branch holding it would stay folded. The false written on
+       the way in is what stops a loop. */
     if (seen.has(node.id)) return seen.get(node.id);
     seen.set(node.id, false);
 
-    const below = [...Store.childrenOf(node.id),
-                   ...Store.connectedInto(node.id).map(b => b.node)];
     let holdsMatch = matches(node.name);
-    below.forEach(child => {
-      if (openToMatches(child, opened, seen)) holdsMatch = true;
+    Store.childrenOf(node.id).forEach(child => {
+      if (revealMatchingGrafts(child, folded, seen)) holdsMatch = true;
     });
-    if (holdsMatch) opened.add(node.id);
+    Store.connectedInto(node.id).forEach(b => {
+      if (revealMatchingGrafts(b.node, folded, seen)) {
+        folded.delete(b.connection.id);
+        holdsMatch = true;
+      }
+    });
     seen.set(node.id, holdsMatch);
     return holdsMatch;
   }
 
   function buildHierarchy() {
     const field = Store.byId(rootId);
-
-    /* Everything at once is the escape hatch; otherwise only the field and the
-       branch being worked down have their children drawn. */
-    const opened = new Set([field.id]);
-    if (!graphShowAll) {
-      drawnPathTo(field, selectedId).forEach(id => opened.add(id));
-      /* A search opens whatever branch the match is in, because a closed one
-         hiding the only hit looks exactly like no hit at all. */
-      if (query) openToMatches(field, opened, new Map());
-    }
+    const folded = foldedGrafts();
 
     /* `path` is every topic id from the root down to this one. A topic already
        on that chain is not descended into again, so even a connection that
@@ -119,7 +112,7 @@ const Tree = (() => {
     const make = (node, depth, path, key, borrowed, connection) => {
       const isCollapsed = graphShowAll
         ? collapsed.has(node.id)
-        : !opened.has(node.id);
+        : !!connection && folded.has(connection.id);
       const rawKids  = Store.childrenOf(node.id);
       const brought  = Store.connectedInto(node.id);
       const nextPath = new Set(path).add(node.id);
@@ -141,6 +134,11 @@ const Tree = (() => {
         connectionId: connection ? connection.id : null,
         originName:   home ? home.name : '',
         hiddenKids:   isCollapsed ? kids.length + grafts.length : 0,
+        /* Only a connected branch offers a fold here; everything at once is
+           the one view where folding any branch by hand still makes sense. */
+        canFold:      !isCollapsed && (graphShowAll
+                        ? kids.length + grafts.length > 0
+                        : !!connection),
         children:     isCollapsed ? [] : [
           ...kids.map(k =>
             make(k, depth + 1, nextPath, key + '/' + k.id, borrowed, null)),
@@ -284,10 +282,11 @@ const Tree = (() => {
   /* ---------------- what the All graph shows ----------------
 
      Every topic at once is a hairball, and a hairball is a picture of nothing.
-     The graph draws the fields, and opens the one you are looking at: select
-     anything and its field unfolds, select something else and the last one
-     folds away again. One field's worth of detail at a time, with the whole
-     shape still around it.
+     So the graph draws the fields, and you open the ones you want: clicking a
+     field unfolds it, clicking it again folds it back. It is a toggle, not a
+     spotlight — several fields can stand open together, and none of them shuts
+     because you clicked elsewhere, because working across two fields is the
+     whole reason for having them side by side.
 
      A relationship into a topic that is folded away is not dropped — it is
      drawn to the field holding it instead, so the graph still says "these two
@@ -301,13 +300,24 @@ const Tree = (() => {
     const ids = new Set(Store.state.nodes.filter(n => !n.parentId).map(n => n.id));
     if (graphShowAll) return new Set(Store.state.nodes.map(n => n.id));
 
-    const focused = selectedId ? Store.byId(selectedId) : null;
-    const field = focused ? Store.domainOf(focused.id) : null;
-    if (field) {
-      ids.add(field.id);
-      Store.descendantsOf(field.id).forEach(n => ids.add(n.id));
-    }
+    expandedFields.forEach(id => {
+      if (!Store.byId(id)) return;              // the field has since been deleted
+      ids.add(id);
+      Store.descendantsOf(id).forEach(n => ids.add(n.id));
+    });
     return ids;
+  }
+
+  /* Whether a field is drawn open. Only a field folds in this view: a
+     sub-topic is on screen exactly when the field holding it is open. */
+  const graphFoldable = id => {
+    const node = Store.byId(id);      // a card outliving the topic it drew
+    return !!node && !graphShowAll && !node.parentId
+           && Store.descendantsOf(id).length > 0;
+  };
+
+  function toggleField(id) {
+    expandedFields.has(id) ? expandedFields.delete(id) : expandedFields.add(id);
   }
 
   /* The nearest thing up the tree that is actually on screen. */
@@ -359,7 +369,11 @@ const Tree = (() => {
       connectionId: null,
       originName: '',
       children: [],
-      hiddenKids: 0,
+      /* A folded field says how much is inside it, so the graph never quietly
+         drops a topic; an open one offers the badge that folds it back. */
+      hiddenKids: graphFoldable(n.id) && !expandedFields.has(n.id)
+                    ? Store.descendantsOf(n.id).length : 0,
+      canFold:    graphFoldable(n.id) && expandedFields.has(n.id),
     }));
   }
 
@@ -848,7 +862,14 @@ const Tree = (() => {
       ev.stopPropagation();                       // never start a canvas pan
       if (isGraphMode()) startCardDrag(ev, n);
     });
-    card.addEventListener('click', ev => { ev.stopPropagation(); select(n.id); });
+    /* Clicking a field in the All graph opens it, and clicking it again closes
+       it — the same gesture both ways, so reading one sub-topic after another
+       never folds the field away under you. */
+    card.addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (isGraphMode() && !graphShowAll && graphFoldable(n.id)) toggleField(n.id);
+      select(n.id);
+    });
     /* Renaming happens where the topic lives, so two drawings of it can never
        open two editors over the same name. */
     if (!n.borrowed) {
@@ -892,25 +913,25 @@ const Tree = (() => {
     return actions;
   }
 
-  /* Collapsed branches keep a count, so nothing disappears silently. */
+  /* Folded branches keep a count, so nothing disappears silently. The badge is
+     a toggle both ways: the same button that opened a branch closes it again,
+     and it stays as you left it until you press it back. */
   function foldControl(n) {
-    const drilling = !isGraphMode() && !graphShowAll;
     const badge = html('button', 'card-badge' + (n.hiddenKids ? '' : ' card-fold'));
     if (n.hiddenKids) {
       badge.textContent = '+' + n.hiddenKids;
-      badge.title = drilling
-        ? 'Open this branch — ' + n.hiddenKids + ' inside'
-        : 'Expand ' + n.hiddenKids + ' hidden sub-topics';
-    } else if (drilling) {
-      /* Nothing to fold by hand here: what is open is what you are working
-         down, and stepping out is selecting something else. */
-      badge.style.display = 'none';
+      badge.title = (n.graftRoot ? 'Open this connected branch — ' : 'Open this branch — ')
+                  + n.hiddenKids + ' inside';
+    } else if (n.canFold) {
+      badge.textContent = '–';
+      badge.title = n.graftRoot
+        ? 'Fold this connected branch away'
+        : 'Fold this branch away';
     } else {
-      badge.textContent = '\u2013';
-      badge.title = 'Collapse this branch';
-      if (!n.children.length) badge.style.display = 'none';
+      /* Nothing here folds: a field's own sub-topics are simply drawn. */
+      badge.style.display = 'none';
     }
-    badge.addEventListener('click', ev => { ev.stopPropagation(); toggleCollapse(n.id); });
+    badge.addEventListener('click', ev => { ev.stopPropagation(); toggleFold(n); });
     return badge;
   }
 
@@ -1100,33 +1121,101 @@ const Tree = (() => {
   function select(id) {
     selectedId = id || null;
     if (editingId && editingId !== selectedId) editingId = null;
+    /* Following a reference or a search into a topic inside a folded field has
+       to bring the field open with it, or the graph would be asked to select
+       something it is not drawing. Folding is otherwise entirely by hand. */
+    if (selectedId && isGraphMode() && !graphShowAll) {
+      const field = Store.domainOf(selectedId);
+      if (field && field.id !== selectedId) expandedFields.add(field.id);
+    }
     render();
     onSelect(selectedId);
   }
 
-  /* A topic with no sub-topics of its own can still have a branch connected
-     into it, and that branch is drawn beneath it like any other — so it folds
-     like any other. Counting only real children left a fold badge on screen
-     that did nothing when clicked. */
-  function toggleCollapse(id) {
-    if (!Store.byId(id)) return;
-    if (!Store.childrenOf(id).length && !Store.connectedInto(id).length) return;
-    /* While the tree opens the branch being worked down, folding by hand is
-       not a separate idea: the badge on a closed branch opens it, which is
-       selecting it. Manual folds belong to the everything-at-once view. */
-    if (!isGraphMode() && !graphShowAll) { select(id); return; }
-    collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
+  /* The badge on a card. What folding means depends on where you are: a field
+     in the All graph, any branch when everything is drawn at once, and in a
+     tree only the connected branch this card heads. */
+  function toggleFold(n) {
+    if (!Store.byId(n.id)) return;
+    if (graphShowAll) {
+      collapsed.has(n.id) ? collapsed.delete(n.id) : collapsed.add(n.id);
+    } else if (isGraphMode()) {
+      if (!graphFoldable(n.id)) return;
+      toggleField(n.id);
+    } else if (n.connectionId) {
+      closedGrafts.has(n.connectionId)
+        ? closedGrafts.delete(n.connectionId)
+        : closedGrafts.add(n.connectionId);
+    } else {
+      return;                                   // a field's own branches stay drawn
+    }
     render();
   }
 
-  /* In a tree this unfolds every branch. In the graph, where only the field
-     you are looking at is opened, it is the escape hatch: everything at once,
-     and pressing it again goes back to the tidy view. */
+  /* What the inspector's fold button should say, or null when folding this
+     topic from there would do nothing — which in a tree is anything without a
+     branch connected into it. */
+  function foldLabelFor(id) {
+    const node = Store.byId(id);
+    if (!node) return null;
+
+    if (graphShowAll) {
+      /* The All graph draws every topic while this is on, so folding one there
+         would change nothing — offering the button would be a lie. */
+      if (isGraphMode()) return null;
+      if (!Store.childrenOf(id).length && !Store.connectedInto(id).length) return null;
+      return collapsed.has(id) ? 'Expand branch' : 'Collapse branch';
+    }
+    if (isGraphMode()) {
+      if (!graphFoldable(id)) return null;
+      return expandedFields.has(id) ? 'Collapse field' : 'Expand field';
+    }
+    const brought = Store.connectedInto(id);
+    if (!brought.length) return null;
+    return brought.some(b => closedGrafts.has(b.connection.id))
+      ? 'Show connected branches'
+      : 'Fold connected branches';
+  }
+
+  /* The same toggle, reached from the inspector rather than from a card. */
+  function toggleCollapse(id) {
+    if (!foldLabelFor(id)) return;
+
+    if (graphShowAll) {
+      collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
+    } else if (isGraphMode()) {
+      toggleField(id);
+    } else {
+      const brought = Store.connectedInto(id);
+      const opening = brought.some(b => closedGrafts.has(b.connection.id));
+      brought.forEach(b => opening
+        ? closedGrafts.delete(b.connection.id)
+        : closedGrafts.add(b.connection.id));
+    }
+    render();
+    /* The button that was just pressed says which way it will go next, so the
+       panel holding it has to be redrawn — pressing "fold" and being left with
+       a button still offering to fold reads as a button that did nothing. */
+    onSelect(selectedId);
+  }
+
+  /* Everything at once, and back again. In a tree that means the connected
+     branches you folded away are drawn too, and pressing it again brings your
+     folds back exactly as they were.
+
+     In the graph, pressing it again is the tidy-up: back to the fields alone.
+     Nothing else shuts several open fields at once, and since opening one no
+     longer closes the last, there has to be something that does. */
   function expandAll() {
     graphShowAll = !graphShowAll;
     if (graphShowAll) collapsed.clear();
+    else if (isGraphMode()) expandedFields.clear();
     render();
     fit();
+    /* It changes what the inspector's fold button can do — and in the All
+       graph it takes that button away entirely — so the panel is redrawn
+       rather than left offering a fold that no longer folds anything. */
+    onSelect(selectedId);
     return graphShowAll;
   }
 
@@ -1185,7 +1274,8 @@ const Tree = (() => {
   }
 
   return {
-    init, render, fit, queueFit, zoom, centerOn, select, expandAll, setQuery, toggleCollapse,
+    init, render, fit, queueFit, zoom, centerOn, select, expandAll, setQuery,
+    toggleCollapse, foldLabelFor,
     setRoot, setShowActivity, setShowRefs, relayoutGraph, startRename,
     get selectedId()   { return selectedId; },
     get rootId()       { return rootId; },

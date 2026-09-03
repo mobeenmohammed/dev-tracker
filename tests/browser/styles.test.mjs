@@ -186,5 +186,37 @@ const themed = css.split('html[data-theme="light"]');
 check('connections have a colour in the dark theme', /--connect:\s*#/.test(themed[0]));
 check('and in the light theme', /--connect:\s*#/.test(themed[1] || ''));
 
+/* Every application stage gets a colour of its own, in both themes. Screening
+   and Assessment used to share one, which made the two busiest bands of the
+   board indistinguishable from each other. */
+const STAGES = ['wishlist', 'applied', 'screen', 'assessment',
+                'interview', 'offer', 'rejected', 'withdrawn'];
+for (const [themeName, block] of [['dark', themed[0]], ['light', themed[1] || '']]) {
+  /* Read the value that follows each token rather than matching around it:
+     the colours are the point, and a regex is one backslash away from lying
+     about having found them. */
+  const hues = STAGES.map(id => {
+    const at = block.indexOf(`--stg-${id}:`);
+    return at < 0 ? null : (block.slice(at, at + 40).match(/#[0-9a-f]{3,8}/i) || [])[0];
+  });
+  check(`every stage has a colour in the ${themeName} theme`,
+        hues.every(Boolean), STAGES.filter((_, i) => !hues[i]).join(', ') + ' missing');
+  check(`and no two stages share one in the ${themeName} theme`,
+        new Set(hues).size === hues.length,
+        hues.join(' '));
+}
+
+/* The colour has to reach the row, not just a dot beside it. */
+check('a row carries the colour of the stage it is filed under',
+      /\.stage-of-applied\s*\{\s*--stage:\s*var\(--stg-applied\)/.test(css));
+check('and wears it on its own edge',
+      /\.app-row\s*\{[^}]*border-left:[^}]*var\(--stage/.test(css));
+/* Laid behind the text: a wash drawn over it, however faint, greys every word
+   underneath, which is the whole content of the row. */
+check('the wash sits behind the text rather than over it',
+      /\.app-row::before\s*\{[^}]*z-index:\s*-1/.test(css));
+check('which only works if the row isolates its own stacking context',
+      /\.app-row\s*\{[^}]*isolation:\s*isolate/.test(css));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

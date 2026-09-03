@@ -190,7 +190,7 @@ const Applications = (() => {
 
     const today = Store.todayISO();
     box.innerHTML = `<h3>Needs attention</h3>` + due.map(a => `
-      <div class="due-row ${a.nextDue < today ? 'is-late' : ''}">
+      <div class="due-row stage-of-${esc(a.stage)} ${a.nextDue < today ? 'is-late' : ''}">
         <strong>${esc(a.company)}</strong>
         <span>${esc(a.nextAction || 'follow up')}</span>
         <span class="due-when">${esc(Store.relativeDay(a.nextDue))}</span>
@@ -213,8 +213,11 @@ const Applications = (() => {
       const inStage = all.filter(a => a.stage === stage.id);
       if (!inStage.length) return;
 
+      /* The stage's colour is set once on the group and inherited by the rows,
+         the heading and the panel below, so a card's colour and the band it is
+         filed under can never disagree. */
       const group = document.createElement('div');
-      group.className = 'app-group';
+      group.className = `app-group stage-of-${stage.id}`;
       group.innerHTML = `<h3 class="app-stage-head">
           <span class="stage-dot stage-${esc(stage.id)}"></span>
           ${esc(stage.label)} <span class="muted">${inStage.length}</span>
@@ -230,7 +233,8 @@ const Applications = (() => {
 
   function appRow(app) {
     const row = document.createElement('div');
-    row.className = 'app-row' + (app.id === expandedId ? ' is-selected' : '');
+    row.className = `app-row stage-of-${app.stage}`
+                  + (app.id === expandedId ? ' is-selected' : '');
     row.innerHTML = `
       <span class="app-company">
         <span class="logo-slot"></span>
@@ -260,7 +264,7 @@ const Applications = (() => {
 
   function appDetail(app) {
     const panel = document.createElement('div');
-    panel.className = 'app-detail';
+    panel.className = `app-detail stage-of-${app.stage}`;
 
     panel.innerHTML = `
       <div class="pd-grid">

@@ -805,7 +805,6 @@ const Views = (() => {
 
   function inspActions(node) {
     const sec = section('Actions');
-    const kids = Store.childrenOf(node.id);
     const extra = Store.descendantsOf(node.id).length;
 
     const row = document.createElement('div');
@@ -821,11 +820,14 @@ const Views = (() => {
     });
     row.appendChild(addBtn);
 
-    if (kids.length) {
+    /* Offered only where it does something, and labelled with what pressing it
+       will do rather than with what the canvas happens to be showing. */
+    const foldLabel = Tree.foldLabelFor(node.id);
+    if (foldLabel) {
       const fold = document.createElement('button');
       fold.className = 'btn btn-sm';
       fold.id = 'collapseBtn';
-      fold.textContent = 'Collapse branch';
+      fold.textContent = foldLabel;
       fold.addEventListener('click', () => Tree.toggleCollapse(node.id));
       row.appendChild(fold);
     }

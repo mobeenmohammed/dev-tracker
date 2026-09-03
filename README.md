@@ -124,27 +124,32 @@ on the canvas lays the whole thing out again.
 Positions are cached, so selecting a card or ticking something off never
 reshuffles the picture.
 
-#### One branch at a time
+#### A tree is drawn whole
 
-A field with four branches of a dozen topics each is a wall a screen and a
-half wide, and none of it is what you are looking at. So a **tree** opens the
-way the graph does: the field's own branches are always there, and below that
-only the branch you are working down. Selecting a topic opens it, selecting
-somewhere else closes what you left, and the badge on a closed branch says how
-many are inside and opens it when clicked.
+A **tree** draws the field it is rooted on in full. Its sub-topics are the
+thing you came to the tree for, and having them open and shut under you as you
+read across them is worse than the width — reading three sub-topics in a row
+should not rearrange the picture three times.
 
-Searching opens whatever branch the match is in — a closed one hiding the only
-hit looks exactly like no hit at all — and leaves the branches with no match
-shut. **⊕** opens the whole tree, and again to come back.
+So nothing in a field's own tree folds. The one thing that does is a branch
+connected in from somewhere else, because that is a whole second tree arriving
+inside this one: its head carries a **+ / –** badge, and that badge is a
+toggle. Fold it, go and read something else, come back, and it is still
+folded. Searching still reaches inside a folded branch — one hiding the only
+hit looks exactly like no hit at all — and folds itself away again when the
+search is cleared. **⊕** draws every connected branch regardless, and again to
+get your folds back.
 
-#### One field at a time
+#### The fields you open
 
 Every topic at once is a hairball, and a hairball is a picture of nothing. So
-the graph draws the **fields**, and opens the one you are looking at: select
-anything and its field unfolds, select something else and the last one folds
-away again. One field's worth of detail, with the whole shape still around it.
-**⊕** on the canvas is the escape hatch — every topic at once, and again to go
-back.
+the graph draws the **fields**, and you open the ones you want: click a field
+to unfold it, click it again to fold it back. It is a toggle, not a spotlight
+— several fields stand open together, and none of them shuts because you
+clicked elsewhere, because comparing two fields is the reason for having them
+side by side. **⊕** shows every topic at once; pressing it again is the
+tidy-up, back to the fields alone, which is also the only thing that shuts
+several at once.
 
 A relationship into a topic that is folded away is **not** dropped, which is
 the awkward case worth being explicit about. It is drawn to the field holding
@@ -617,6 +622,15 @@ search is in its history rather than its current state. It reads either as a
 **list** grouped by stage, or as a **flow** — bands for each stage joined by
 ribbons showing how many applications moved between them, which makes where
 things stall obvious at a glance.
+
+Each stage has a colour of its own, and it is carried by the whole application
+rather than by a dot beside the company name: the band it is filed under, the
+edge and wash of its row, the panel that opens beneath it, and its line in
+*Needs attention* all take the same hue, so the stage is legible from across
+the room and a row can never disagree with the band it sits in. The wash is
+laid *behind* the text — a tint drawn over it, however faint, greys every word
+underneath, which is the whole content of the row. Screening and Assessment,
+the two busiest stages, used to share a colour; they no longer do.
 
 Changing the stage records a dated event, but **correcting a mis-click leaves
 no trace**: a change made the same day, on top of an automatic event nobody has
