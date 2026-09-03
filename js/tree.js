@@ -28,11 +28,12 @@ const Tree = (() => {
   let onSelect = () => {};
   let onAction = () => {};
   let collapsed = new Set();
-  /* Connected branches folded away by hand. A field's own tree is always
-     drawn in full — the only thing in it that folds is a branch borrowed from
-     somewhere else — and folding one is a toggle that stays put, so reading
-     across several sub-topics never closes what you left open. */
-  const closedGrafts = new Set();
+  /* Borrowed branches folded away by hand, held by drawn key. A field's own
+     tree is always drawn in full — the only things in it that fold are the
+     branches borrowed from somewhere else and the topics inside them — and
+     folding one is a toggle that stays put, so reading across several
+     sub-topics never closes what you left open. */
+  const foldedBranches = new Set();
   /* Fields opened in the All graph, by hand and one click at a time. Opening
      is a toggle as well: several fields can be open together, and none of
      them closes because you went to look at another. */
@@ -59,51 +60,75 @@ const Tree = (() => {
      `id` is no longer unique within a render. `key` is: it carries the whole
      path down to this instance, and anything that has to tell two drawings of
      one topic apart uses it. */
-  /* Which connected branches are folded away.
+  /* Which borrowed branches are folded away.
 
      A field's own tree is drawn in full: its sub-topics are the thing you came
      to the tree for, and having them open and close under you as you read
      across them is worse than the width. What does fold is a branch borrowed
      from another field, because that is a whole second tree arriving inside
-     this one — so those, and only those, carry a fold badge.
+     this one — and anything inside one, because a borrowed branch can be as
+     deep as the tree it came from, and a control that folds its head but
+     nothing under it is only half a control.
 
-     Reopening is by hand and stays that way until you say otherwise. */
-  function foldedGrafts() {
+     Folds are held by the drawn key rather than by the topic id: one topic can
+     be borrowed into two places at once, and folding it in one of them has no
+     business folding it in the other. */
+  function foldsInEffect() {
     if (graphShowAll) return new Set();
-    const folded = new Set(closedGrafts);
+    const folded = new Set(foldedBranches);
     /* A search reopens whatever branch the match is in, because a folded one
        hiding the only hit looks exactly like no hit at all. */
-    if (query) revealMatchingGrafts(Store.byId(rootId), folded, new Map());
+    if (query) revealMatches(Store.byId(rootId), rootId, false, new Set(), folded);
     return folded;
   }
 
-  /* Unfolds every connected branch holding something the search matched, and
-     says whether this one held anything, so a branch with no hits stays shut. */
-  function revealMatchingGrafts(node, folded, seen) {
-    /* The answer is remembered rather than the visit: a branch reached twice —
-       a connected one can be — would otherwise be told "no match" the second
-       time and the branch holding it would stay folded. The false written on
-       the way in is what stops a loop. */
-    if (seen.has(node.id)) return seen.get(node.id);
-    seen.set(node.id, false);
+  /* Unfolds every borrowed branch holding something the search matched, and
+     says whether this one held anything, so a branch with no hits stays shut.
+     It walks the drawing rather than the store — down the same paths, guarded
+     against loops the same way — so the keys it unfolds are keys that exist. */
+  function revealMatches(node, key, borrowed, path, folded) {
+    if (path.has(node.id)) return false;
+    const nextPath = new Set(path).add(node.id);
+
+    const below = [
+      ...Store.childrenOf(node.id).map(n => ({ node: n, borrowed })),
+      ...Store.connectedInto(node.id).map(b => ({ node: b.node, borrowed: true })),
+    ];
 
     let holdsMatch = matches(node.name);
-    Store.childrenOf(node.id).forEach(child => {
-      if (revealMatchingGrafts(child, folded, seen)) holdsMatch = true;
+    below.forEach(child => {
+      if (revealMatches(child.node, key + '/' + child.node.id,
+                        child.borrowed, nextPath, folded)) holdsMatch = true;
     });
-    Store.connectedInto(node.id).forEach(b => {
-      if (revealMatchingGrafts(b.node, folded, seen)) {
-        folded.delete(b.connection.id);
-        holdsMatch = true;
-      }
-    });
-    seen.set(node.id, holdsMatch);
+    /* Every borrowed branch on the way down to a hit opens, not just the one
+       holding it, or the hit is still inside something shut. */
+    if (holdsMatch && borrowed) folded.delete(key);
     return holdsMatch;
+  }
+
+  /* The keys the inspector's fold button acts on: the topic itself where it is
+     drawn inside a borrowed branch, and the connected branches arriving right
+     at it. `own` says which of the two, because the button has to be honest
+     about what pressing it folds. */
+  function foldTargets(id) {
+    const keys = [];
+    let own = false;
+    /* What was last drawn, flat — the cards still hold their children, and a
+       topic drawn twice appears twice, which is exactly what is wanted here. */
+    const drawn = (layoutRoot && layoutRoot.flat) || [];
+    const foldable = n => n.children.length > 0 || n.hiddenKids > 0;
+
+    drawn.forEach(n => {
+      if (n.id !== id) return;
+      if (n.borrowed && foldable(n)) { keys.push(n.key); own = true; }
+      n.children.forEach(c => { if (c.graftRoot && foldable(c)) keys.push(c.key); });
+    });
+    return { keys, own };
   }
 
   function buildHierarchy() {
     const field = Store.byId(rootId);
-    const folded = foldedGrafts();
+    const folded = foldsInEffect();
 
     /* `path` is every topic id from the root down to this one. A topic already
        on that chain is not descended into again, so even a connection that
@@ -112,7 +137,7 @@ const Tree = (() => {
     const make = (node, depth, path, key, borrowed, connection) => {
       const isCollapsed = graphShowAll
         ? collapsed.has(node.id)
-        : !!connection && folded.has(connection.id);
+        : !!borrowed && folded.has(key);
       const rawKids  = Store.childrenOf(node.id);
       const brought  = Store.connectedInto(node.id);
       const nextPath = new Set(path).add(node.id);
@@ -134,11 +159,12 @@ const Tree = (() => {
         connectionId: connection ? connection.id : null,
         originName:   home ? home.name : '',
         hiddenKids:   isCollapsed ? kids.length + grafts.length : 0,
-        /* Only a connected branch offers a fold here; everything at once is
-           the one view where folding any branch by hand still makes sense. */
-        canFold:      !isCollapsed && (graphShowAll
-                        ? kids.length + grafts.length > 0
-                        : !!connection),
+        /* Only what was borrowed offers a fold here; everything at once is the
+           one view where folding any branch by hand still makes sense. Either
+           way there has to be something under it, or the badge folds nothing. */
+        canFold:      !isCollapsed
+                        && kids.length + grafts.length > 0
+                        && (graphShowAll || !!borrowed),
         children:     isCollapsed ? [] : [
           ...kids.map(k =>
             make(k, depth + 1, nextPath, key + '/' + k.id, borrowed, null)),
@@ -1142,10 +1168,10 @@ const Tree = (() => {
     } else if (isGraphMode()) {
       if (!graphFoldable(n.id)) return;
       toggleField(n.id);
-    } else if (n.connectionId) {
-      closedGrafts.has(n.connectionId)
-        ? closedGrafts.delete(n.connectionId)
-        : closedGrafts.add(n.connectionId);
+    } else if (n.borrowed) {
+      foldedBranches.has(n.key)
+        ? foldedBranches.delete(n.key)
+        : foldedBranches.add(n.key);
     } else {
       return;                                   // a field's own branches stay drawn
     }
@@ -1170,11 +1196,11 @@ const Tree = (() => {
       if (!graphFoldable(id)) return null;
       return expandedFields.has(id) ? 'Collapse field' : 'Expand field';
     }
-    const brought = Store.connectedInto(id);
-    if (!brought.length) return null;
-    return brought.some(b => closedGrafts.has(b.connection.id))
-      ? 'Show connected branches'
-      : 'Fold connected branches';
+    const { keys, own } = foldTargets(id);
+    if (!keys.length) return null;
+    const opening = keys.some(k => foldedBranches.has(k));
+    if (own) return opening ? 'Show this branch' : 'Fold this branch';
+    return opening ? 'Show connected branches' : 'Fold connected branches';
   }
 
   /* The same toggle, reached from the inspector rather than from a card. */
@@ -1186,11 +1212,9 @@ const Tree = (() => {
     } else if (isGraphMode()) {
       toggleField(id);
     } else {
-      const brought = Store.connectedInto(id);
-      const opening = brought.some(b => closedGrafts.has(b.connection.id));
-      brought.forEach(b => opening
-        ? closedGrafts.delete(b.connection.id)
-        : closedGrafts.add(b.connection.id));
+      const { keys } = foldTargets(id);
+      const opening = keys.some(k => foldedBranches.has(k));
+      keys.forEach(k => opening ? foldedBranches.delete(k) : foldedBranches.add(k));
     }
     render();
     /* The button that was just pressed says which way it will go next, so the

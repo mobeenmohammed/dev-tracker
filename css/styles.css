@@ -448,6 +448,9 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   flex: none;
 }
 
+/* The List view is out of the app — its markup in index.html is commented out
+   and app.js no longer wires it up. Its rules are kept rather than deleted so
+   that bringing the view back is uncommenting the markup and nothing else. */
 .list-body { overflow-y: auto; padding: 6px 0 20px; }
 
 .list-domain { padding: 14px 16px 4px; }
@@ -1142,15 +1145,33 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .focus-list { display: grid; gap: 3px; }
 
 .task {
+  position: relative;
+  isolation: isolate;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 9px 11px;
   border: 1px solid var(--border);
+  border-left: 3px solid var(--tint, var(--border));
   border-radius: var(--radius-s);
   background: var(--bg-elev-2);
 }
-.task:hover { border-color: var(--border-strong); }
+/* Behind the text, never over it — the same reason the application rows lay
+   their wash underneath. A task with no topic gets no wash at all. */
+.task::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--tint, transparent);
+  opacity: .07;
+  pointer-events: none;
+}
+.task:hover {
+  border-color: var(--border-strong);
+  border-left-color: var(--tint, var(--border-strong));
+}
 .task.is-done { opacity: .62; }
 .task.is-done .task-text { text-decoration: line-through; color: var(--text-dim); }
 
@@ -1188,7 +1209,10 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 
 .task-topic {
   font-size: 11px;
-  color: var(--text-dim);
+  /* The tint reaches the chip through its text; the outline stays as it was,
+     so a task with no topic looks exactly as it always did rather than
+     accidentally fainter. */
+  color: var(--tint, var(--text-dim));
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -1425,7 +1449,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .problem-detail textarea, .app-detail textarea { min-height: 70px; background: var(--bg); }
 /* The open panel carries the same edge as the row above it, so the two read as
    one card rather than as a row and an unrelated box. */
-.app-detail { border-left: 5px solid var(--stage, var(--border)); }
+.app-detail { border-left: 5px solid var(--tint, var(--border)); }
 .pd-actions { display: flex; gap: 7px; align-items: center; margin-top: 10px; }
 .pd-actions .save-state { margin-left: auto; }
 
@@ -1501,7 +1525,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   grid-template-columns: 150px 1fr auto;
   gap: 12px;
   padding: 4px 0 4px 9px;
-  border-left: 3px solid var(--stage, var(--border));
+  border-left: 3px solid var(--tint, var(--border));
   font-size: 12.5px;
 }
 .due-row .due-when { color: var(--text-dim); }
@@ -1512,10 +1536,10 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .app-stage-head {
   display: flex; align-items: center; gap: 8px;
   font-size: 12.5px; margin-bottom: 5px;
-  color: var(--stage, var(--text));
+  color: var(--tint, var(--text));
 }
 .app-stage-head .muted {
-  background: var(--stage, var(--border));
+  background: var(--tint, var(--border));
   color: var(--bg);
   border-radius: 999px;
   padding: 0 7px;
@@ -1524,17 +1548,24 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   font-variant-numeric: tabular-nums;
 }
 
-/* One carrier for the stage colour. Anything that wants to be tinted by the
-   stage it belongs to takes this class and reads --stage, so a new stage needs
-   one token and one line here rather than a rule per element. */
-.stage-of-wishlist   { --stage: var(--stg-wishlist); }
-.stage-of-applied    { --stage: var(--stg-applied); }
-.stage-of-screen     { --stage: var(--stg-screen); }
-.stage-of-assessment { --stage: var(--stg-assessment); }
-.stage-of-interview  { --stage: var(--stg-interview); }
-.stage-of-offer      { --stage: var(--stg-offer); }
-.stage-of-rejected   { --stage: var(--stg-rejected); }
-.stage-of-withdrawn  { --stage: var(--stg-withdrawn); }
+/* One carrier for "the colour this thing is about". Anything that wants to be
+   tinted by the state it belongs to takes one of these classes and reads
+   --tint, so a new stage or status needs one token and one line here rather
+   than a rule per element that shows it. */
+.status-of-planned    { --tint: var(--st-planned); }
+.status-of-learning   { --tint: var(--st-learning); }
+.status-of-practicing { --tint: var(--st-practicing); }
+.status-of-proficient { --tint: var(--st-proficient); }
+.status-of-mastered   { --tint: var(--st-mastered); }
+
+.stage-of-wishlist   { --tint: var(--stg-wishlist); }
+.stage-of-applied    { --tint: var(--stg-applied); }
+.stage-of-screen     { --tint: var(--stg-screen); }
+.stage-of-assessment { --tint: var(--stg-assessment); }
+.stage-of-interview  { --tint: var(--stg-interview); }
+.stage-of-offer      { --tint: var(--stg-offer); }
+.stage-of-rejected   { --tint: var(--stg-rejected); }
+.stage-of-withdrawn  { --tint: var(--stg-withdrawn); }
 
 .stage-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--text-faint); }
 .stage-wishlist   { background: var(--stg-wishlist); }
@@ -1555,7 +1586,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   align-items: center;
   padding: 7px 8px 7px 11px;
   border-bottom: 1px solid var(--border);
-  border-left: 3px solid var(--stage, var(--border));
+  border-left: 3px solid var(--tint, var(--border));
   border-radius: var(--radius-s);
   cursor: pointer;
   font-size: 12.5px;
@@ -1568,19 +1599,19 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   inset: 0;
   z-index: -1;
   border-radius: inherit;
-  background: var(--stage, transparent);
+  background: var(--tint, transparent);
   opacity: .06;
   pointer-events: none;
 }
 .app-row:hover::before { opacity: .14; }
 .app-row.is-selected::before { opacity: .2; }
 .app-row.is-selected { border-left-width: 5px; padding-left: 9px; }
-.app-row .note-flag { color: var(--stage, var(--text-dim)); }
+.app-row .note-flag { color: var(--tint, var(--text-dim)); }
 .app-company { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .app-role, .app-loc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .app-row select {
   padding: 3px 6px; font-size: 12px;
-  border-color: var(--stage, var(--border));
+  border-color: var(--tint, var(--border));
 }
 .app-date { color: var(--text-dim); text-align: right; font-variant-numeric: tabular-nums; }
 
@@ -2124,7 +2155,13 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   backdrop-filter: blur(3px);
 }
 
+/* The screen takes the colour of where the topic has got to, the way an
+   application takes the colour of its stage. A stopwatch is opened on one
+   topic and stared at for half an hour, so what it says about that topic
+   ought to be legible without reading a word of it. */
 .focus-panel {
+  position: relative;
+  isolation: isolate;
   width: min(460px, 100%);
   max-height: 100%;
   overflow-y: auto;
@@ -2134,8 +2171,20 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   padding: 22px;
   background: var(--bg-elev);
   border: 1px solid var(--border-strong);
+  border-top: 3px solid var(--tint, var(--accent));
   border-radius: var(--radius);
   box-shadow: var(--shadow);
+}
+/* Behind the content, so the wash never greys the clock it sits under. */
+.focus-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 150px;
+  z-index: -1;
+  background: linear-gradient(var(--tint, var(--accent)), transparent);
+  opacity: .09;
+  pointer-events: none;
 }
 
 .focus-head { display: flex; align-items: flex-start; gap: 12px; }
@@ -2146,9 +2195,30 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   font-size: 10.5px;
   letter-spacing: .08em;
   text-transform: uppercase;
-  color: var(--text-faint);
+  color: var(--tint, var(--text-faint));
 }
 .focus-where { margin: 3px 0 0; font-size: 12px; }
+
+/* What the topic is at, said as well as shown: the colour is the fast read,
+   the word is the one that is unambiguous. */
+.focus-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 7px 0 0;
+  padding: 2px 9px 2px 7px;
+  font-size: 11.5px;
+  border-radius: 999px;
+  color: var(--tint, var(--text-dim));
+  background: color-mix(in srgb, var(--tint, var(--accent)) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tint, var(--accent)) 34%, transparent);
+}
+.focus-status::before {
+  content: '';
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--tint, var(--text-faint));
+}
 
 .focus-notice {
   margin: 0;
@@ -2168,7 +2238,9 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   line-height: 1;
   font-variant-numeric: tabular-nums;
   letter-spacing: -.02em;
-  color: var(--text);
+  /* Lit in the topic's colour while it runs, and plainly grey once it does
+     not, so a glance at the clock says whether it is counting. */
+  color: var(--tint, var(--text));
   transition: color .2s;
 }
 #focusElapsed.is-paused { color: var(--text-dim); }
@@ -2221,10 +2293,12 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   border: 1px solid transparent;
   white-space: nowrap;
 }
+/* The pill carries the same colour as the screen it leads back to, so the two
+   are recognisably one session rather than two unrelated indicators. */
 .focus-pill.is-running {
-  color: var(--st-mastered);
-  background: color-mix(in srgb, var(--st-mastered) 15%, transparent);
-  border-color: color-mix(in srgb, var(--st-mastered) 40%, transparent);
+  color: var(--tint, var(--st-mastered));
+  background: color-mix(in srgb, var(--tint, var(--st-mastered)) 15%, transparent);
+  border-color: color-mix(in srgb, var(--tint, var(--st-mastered)) 40%, transparent);
 }
 .focus-pill.is-paused {
   color: var(--text-dim);

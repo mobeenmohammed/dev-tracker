@@ -168,7 +168,6 @@ key(renameInput, 'Enter');
 check('inline rename saved', Store.childrenOf('cpp-cmake')[0].name === 'Toolchain files',
       Store.childrenOf('cpp-cmake')[0].name);
 Store.deleteNode(Store.childrenOf('cpp-cmake')[0].id);
-window.Views.renderList();
 
 /* ---------- 3b. last-worked cues ---------- */
 click(tabNamed('All'));           // OpenMP lives under HPC, not the C++ tab
@@ -272,6 +271,7 @@ click($('#activityBtn'));
 check('activity toggle hides card dates', $$('#nodes .card-when').length === 0);
 click($('#activityBtn'));
 check('and brings them back', $$('#nodes .card-when').length > 0);
+Store.deleteSession(freshSession.id);
 
 /* ---------- 3g. references and the graph ---------- */
 click(tabNamed('All'));
@@ -379,82 +379,15 @@ key($('.tab-input'), 'Escape');
 check('Escape cancels a new field', !$('.tab-input') && Store.roots().length === 5,
       `${Store.roots().length} fields`);
 
-/* ---------- 5. list view ---------- */
-click($$('.tab-fixed').find(t => t.dataset.view === 'list'));
-check('list view shown', !$('#view-list').hidden && $('#view-tree').hidden);
-check('list tab marked active', $$('.tab-fixed').find(t => t.dataset.view === 'list').classList.contains('is-active'));
-check('every topic listed', $$('#view-list .list-row').length === Store.state.nodes.length,
-      `${$$('#view-list .list-row').length} rows vs ${Store.state.nodes.length} nodes`);
-check('grouped by field', $$('#view-list .list-domain').length === 5);
-check('rows show when last worked', $$('#view-list .when').some(w => /ago|today|yesterday/.test(w.textContent)));
-check('recent work highlighted', $$('#view-list .when.is-fresh').length > 0);
-Store.deleteSession(freshSession.id);
-window.Views.renderList();
-
-// selecting a row must NOT jump to the tree
-const rowFor = id => $$('#view-list .list-row').find(r => r.querySelector(`[data-status-for="${id}"]`));
-click(rowFor('math-bayes').querySelector('.title'));
-check('row selection stays in the list', !$('#view-list').hidden && $('#view-tree').hidden);
-check('row marked selected', rowFor('math-bayes').classList.contains('is-selected'));
-check('inspector followed the selection', $('.insp-title').textContent.trim() === 'Bayesian Inference',
-      $('.insp-title').textContent);
-check('inline editor opened', !!$('.list-detail'));
-check('editor shows the breadcrumb', $('.list-detail .crumb').textContent.includes('Mathematics'));
-
-/* ---------- 6. notes written from the list ---------- */
-const notes = $('#ld-notes');
-notes.value = 'Started the conjugate priors chapter.';
-fire(notes, 'blur');
-check('description saved from the list', Store.byId('math-bayes').description === 'Started the conjugate priors chapter.',
-      Store.byId('math-bayes').description);
-check('inspector picked the description up', $('#f-description').value.includes('conjugate priors'));
-
-// quick time logging from the same panel
-const minsBefore = Store.minutesFor('math-bayes', false);
-$('#ld-mins').value = '25';
-click($('#ld-log'));
-check('time logged from the list', Store.minutesFor('math-bayes', false) === minsBefore + 25);
-check('logging promoted the status', Store.byId('math-bayes').status !== 'planned', Store.byId('math-bayes').status);
-check('row flags that it has a description', !!rowFor('math-bayes').querySelector('.note-flag'));
-
-/* ---------- 7. list sorting and folding ---------- */
-const sortSel = $('#listSort');
-sortSel.value = 'recent';
-fire(sortSel, 'change');
-// The list stays grouped by field, so "last worked" orders within each group.
-const firstGroupDates = (() => {
-  const out = [];
-  for (const el of $$('#listBody > *')) {
-    if (el.classList.contains('list-domain') && out.length) break;
-    if (el.classList.contains('list-row')) {
-      const id = el.querySelector('[data-status-for]').dataset.statusFor;
-      out.push(Store.lastWorked(id) || '');
-    }
-  }
-  return out;
-})();
-check('last-worked sort orders each group', firstGroupDates.every((d, i, a) => i === 0 || a[i - 1] >= d),
-      firstGroupDates.slice(0, 4).join(' | '));
-sortSel.value = 'name';
-fire(sortSel, 'change');
-check('sorting by name works', $$('#view-list .list-row').length === Store.state.nodes.length);
-sortSel.value = 'tree';
-fire(sortSel, 'change');
-
-click($('#view-list .list-domain'));
-check('clicking a field header folds it', $$('#view-list .list-row').length < Store.state.nodes.length);
-click($('#view-list .list-domain'));
-check('and unfolds it again', $$('#view-list .list-row').length === Store.state.nodes.length);
-
-click($('#listCollapseAll'));
-check('collapse all folds every group', $$('#view-list .list-row').length === 0);
-check('button offers to expand again', $('#listCollapseAll').textContent === 'Expand all');
-click($('#listCollapseAll'));
-check('expand all restores the rows', $$('#view-list .list-row').length === Store.state.nodes.length);
+/* The list view was taken out of the app: it duplicated the tree without
+   telling you anything the tree does not, and went unused. Its code is kept
+   in views.js but nothing wires it up, so the sections that exercised it
+   (the list itself, notes written from it, and its sorting and folding) are
+   gone from here. Reviving the view means reviving them with it. */
 
 /* ---------- 7b. daily focus checklist ---------- */
 click($$('.tab-fixed').find(t => t.dataset.view === 'focus'));
-check('focus view shown', !$('#view-focus').hidden && $('#view-list').hidden);
+check('focus view shown', !$('#view-focus').hidden && $('#view-tree').hidden);
 check('focus tab marked active', $$('.tab-fixed').find(t => t.dataset.view === 'focus').classList.contains('is-active'));
 check('today starts empty', $('#focusList .focus-empty') !== null);
 check('history shows earlier days', $$('#focusHistory .day-group').length === 2,
@@ -481,6 +414,11 @@ check('task added for today', Store.focusFor(Store.todayISO()).length === 1);
 check('task row rendered', $$('#focusList .task').length === 1);
 check('linked topic shown as a chip', $('#focusList .task-topic').textContent === 'MPI',
       $('#focusList .task-topic')?.textContent);
+/* A task takes the colour of the topic it is filed against, so a day's list
+   says at a glance how much of it is ground already covered. */
+check('and the row is tinted by that topic status',
+      $('#focusList .task').classList.contains('status-of-' + Store.byId('hpc-mpi').status),
+      $('#focusList .task').className);
 check('input cleared for the next one', $('#focusText').value === '');
 
 // an empty submission is ignored
@@ -1855,6 +1793,26 @@ click($('#focusBtn'));
 check('the focus screen opens', !$('#focusScreen').hidden);
 check('it names the topic', $('#focusSessionTopic').textContent === 'CMake',
       $('#focusSessionTopic').textContent);
+/* The screen takes the colour of where the topic has got to, the way an
+   application takes the colour of its stage — and says it in words too. */
+check('the screen is tinted by the topic status',
+      $('#focusPanel').classList.contains('status-of-' + Store.byId('cpp-cmake').status),
+      $('#focusPanel').className);
+check('and names that status beside the topic',
+      !$('#focusStatus').hidden &&
+      $('#focusStatus').textContent === Store.STATUS_BY_ID[Store.byId('cpp-cmake').status].label,
+      $('#focusStatus').textContent);
+
+const cmakeStatus = Store.byId('cpp-cmake').status;
+Store.updateNode('cpp-cmake', { status: 'mastered' });
+window.Focus.render();
+check('and it follows the status rather than being painted once',
+      $('#focusPanel').classList.contains('status-of-mastered')
+      && $('#focusStatus').textContent === 'Mastered',
+      $('#focusPanel').className + ' / ' + $('#focusStatus').textContent);
+Store.updateNode('cpp-cmake', { status: cmakeStatus });
+window.Focus.render();
+
 check('the clock is running', !!Store.activeFocus() && Store.activeFocus().startedAt !== null);
 check('and it says so', $('#focusState').textContent === 'running', $('#focusState').textContent);
 check('the button offers to pause', $('#focusToggle').textContent === 'Pause',
@@ -2200,6 +2158,11 @@ $('#focusForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancel
 const noTopic = Store.focusFor(Store.todayISO()).find(t => /Career coach/.test(t.text));
 check('a task with no topic is fine', noTopic && noTopic.nodeId === null,
       noTopic && noTopic.nodeId);
+/* And takes no colour, which is what tells it apart from one that does. */
+const noTopicRow = $$('#focusList .task').find(r => /Career coach/.test(r.querySelector('.task-text').value));
+check('a task filed against nothing is left untinted',
+      noTopicRow && ![...noTopicRow.classList].some(c => c.startsWith('status-of-')),
+      noTopicRow ? noTopicRow.className : 'no row for it');
 
 Store.deleteNode(bare.id);
 Store.deleteFolder(taskInner.id);
@@ -2376,9 +2339,10 @@ check('a topic of this field offers no fold badge at all',
    the fold is a toggle that stays where you put it. */
 Store.addConnection('math-linalg', 'cpp-tooling');
 Tree.render();
-const linalgCards = 1 + Store.descendantsOf('math-linalg').length;
+/* Live, because the checks below grow the branch to fold inside it. */
+const linalgCards = () => 1 + Store.descendantsOf('math-linalg').length;
 check('a connected branch is drawn whole to begin with',
-      shown().length === ownTree() + linalgCards, shown().join(' | '));
+      shown().length === ownTree() + linalgCards(), shown().join(' | '));
 
 const graftBadge = () => nodeNamed('Linear Algebra').querySelector('.card-badge');
 check('its head is the card offering the fold', graftBadge().textContent === '–',
@@ -2397,7 +2361,44 @@ check('reading elsewhere does not reopen what you folded',
 
 click(graftBadge());
 check('and the same badge brings it back',
-      shown().length === ownTree() + linalgCards, shown().join(' | '));
+      shown().length === ownTree() + linalgCards(), shown().join(' | '));
+
+/* A borrowed branch can be as deep as the tree it came from, so the topics
+   inside one fold as well — folding only its head is half a control. */
+const deep = Store.addNode({ parentId: 'math-decomp', name: 'Singular Values' });
+Tree.render();
+const deepShown = () => shown().includes('Singular Values');
+check('a topic inside a borrowed branch comes with it', deepShown(), shown().join(' | '));
+
+const innerBadge = () => nodeNamed('Matrix Decompositions').querySelector('.card-badge');
+check('and it offers a fold of its own', innerBadge().textContent === '–',
+      innerBadge().textContent);
+click(innerBadge());
+check('folding it takes away what is under it', !deepShown(), shown().join(' | '));
+check('and nothing else in the branch', shown().includes('Numerical Stability')
+      && shown().includes('Linear Algebra'), shown().join(' | '));
+click(innerBadge());
+check('and it comes back', deepShown(), shown().join(' | '));
+
+/* Folds belong to where a topic is drawn, not to the topic: the same topic
+   borrowed into two trees folds in each of them on its own. */
+click(innerBadge());
+check('the borrowed copy is folded', !deepShown(), shown().join(' | '));
+click(tabNamed('Mathematics'));
+check('but it is whole in the tree it really lives in',
+      treeNodes().map(nodeLabel).includes('Singular Values'),
+      treeNodes().map(nodeLabel).join(' | '));
+clickNode('Matrix Decompositions');
+check('and where it lives it offers no fold at all', !$('#collapseBtn'),
+      $('#collapseBtn') ? $('#collapseBtn').textContent : '');
+
+click(tabNamed('C++'));
+clickNode('Matrix Decompositions');
+check('while the borrowed one calls the fold its own branch',
+      $('#collapseBtn') && $('#collapseBtn').textContent === 'Show this branch',
+      $('#collapseBtn') ? $('#collapseBtn').textContent : 'no fold button');
+click($('#collapseBtn'));
+check('and pressing it brings the branch back', deepShown(), shown().join(' | '));
 
 /* The inspector says which way it will go, rather than always saying fold. */
 clickNode('Tooling');
@@ -2423,11 +2424,12 @@ check('and it folds itself away again afterwards',
 /* And everything at once is still one button away. */
 click($('#expandAllBtn'));
 check('the expand button draws the folded branch too',
-      shown().length === ownTree() + linalgCards, shown().join(' | '));
+      shown().length === ownTree() + linalgCards(), shown().join(' | '));
 click($('#expandAllBtn'));
 check('and pressing it again gives your folds back',
       shown().length === ownTree() + 1, shown().join(' | '));
 
+Store.deleteNode(deep.id);
 Store.state.connections.slice().forEach(c => Store.deleteConnection(c.id));
 Tree.select(null);
 Tree.render();

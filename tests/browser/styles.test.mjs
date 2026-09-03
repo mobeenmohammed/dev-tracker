@@ -27,7 +27,7 @@ const display = el => window.getComputedStyle(el).display;
 for (const [label, sel] of [
   ['seed banner',   '#banner'],
   ['focus view',    '#view-focus'],
-  ['list view',     '#view-list'],
+  ['projects view', '#view-projects'],
   ['stats view',    '#view-stats'],
   ['toast',         '#toast'],
   ['inspector body','#inspectorBody'],
@@ -208,9 +208,9 @@ for (const [themeName, block] of [['dark', themed[0]], ['light', themed[1] || ''
 
 /* The colour has to reach the row, not just a dot beside it. */
 check('a row carries the colour of the stage it is filed under',
-      /\.stage-of-applied\s*\{\s*--stage:\s*var\(--stg-applied\)/.test(css));
+      /\.stage-of-applied\s*\{\s*--tint:\s*var\(--stg-applied\)/.test(css));
 check('and wears it on its own edge',
-      /\.app-row\s*\{[^}]*border-left:[^}]*var\(--stage/.test(css));
+      /\.app-row\s*\{[^}]*border-left:[^}]*var\(--tint/.test(css));
 /* Laid behind the text: a wash drawn over it, however faint, greys every word
    underneath, which is the whole content of the row. */
 check('the wash sits behind the text rather than over it',

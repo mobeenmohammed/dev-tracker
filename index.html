@@ -80,7 +80,11 @@
     <button class="tab tab-fixed" data-view="problems" role="tab">Problems</button>
     <button class="tab tab-fixed" data-view="projects" role="tab">Projects</button>
     <button class="tab tab-fixed" data-view="apps" role="tab">Applications</button>
+    <!-- The List view is out of the app. It said nothing the tree does not,
+         and went unused. Its markup and its code are kept rather than deleted,
+         so bringing it back is uncommenting this and the section below.
     <button class="tab tab-fixed" data-view="list"  role="tab">List</button>
+    -->
     <button class="tab tab-fixed" data-view="stats" role="tab">Stats</button>
   </div>
 </nav>
@@ -89,12 +93,13 @@
      it is for, and dismissable without stopping the clock. -->
 <div id="focusScreen" class="focus-screen" role="dialog" aria-modal="true"
      aria-labelledby="focusSessionTopic" hidden>
-  <div class="focus-panel">
+  <div class="focus-panel" id="focusPanel">
     <div class="focus-head">
       <div>
         <p class="focus-eyebrow">Focusing on</p>
         <h2 id="focusSessionTopic"></h2>
         <p id="focusWhere" class="focus-where muted"></p>
+        <p id="focusStatus" class="focus-status" hidden></p>
       </div>
       <button id="focusClose" class="btn btn-icon" title="Leave this open in the background (Esc)"
               aria-label="Back, leaving the clock running">&times;</button>
@@ -193,7 +198,10 @@
     </div>
   </section>
 
-  <!-- ============ LIST VIEW ============ -->
+  <!-- ============ LIST VIEW (out of the app; kept to be revived) ============
+       Uncomment this and its tab above to bring the view back. Its code in
+       views.js and its styles were left in place for exactly that. -->
+  <!--
   <section class="panel view" id="view-list" hidden>
     <div class="list-toolbar">
       <label class="field-inline">
@@ -219,6 +227,7 @@
     </div>
     <div id="listBody" class="list-body"></div>
   </section>
+  -->
 
   <!-- ============ FOCUS VIEW ============ -->
   <section class="panel view" id="view-focus" hidden>

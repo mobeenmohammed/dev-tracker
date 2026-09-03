@@ -15,7 +15,10 @@
   let showRefs = true;
   let inspectorWidth = 340;   // px, dragged by the divider and remembered
 
-  const VIEWS = ['tree', 'focus', 'problems', 'projects', 'apps', 'list', 'stats'];
+  /* 'list' is deliberately absent: the List view is out of the app. Leaving it
+     out here is also what makes a session saved on it reopen on the tree
+     instead of asking for a panel that is no longer in the markup. */
+  const VIEWS = ['tree', 'focus', 'problems', 'projects', 'apps', 'stats'];
 
   const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -151,9 +154,7 @@
     Tree.render();
     renderTabs();
     Views.renderLegend();
-    Views.fillListFilters();
     Views.renderInspector(selectedId);
-    if (currentView === 'list')  Views.renderList(selectedId);
     if (currentView === 'stats') Views.renderStats();
     if (currentView === 'focus') Views.renderFocus();
     if (currentView === 'problems') { Problems.fillForm(); Problems.render(); }
@@ -165,7 +166,6 @@
     currentView = view;
     VIEWS.forEach(v => document.getElementById('view-' + v).hidden = v !== view);
 
-    if (view === 'list')  { Views.fillListFilters(); Views.renderList(selectedId); }
     if (view === 'stats') Views.renderStats();
     if (view === 'focus') Views.renderFocus();
     if (view === 'problems') { Problems.fillForm(); Problems.render(); }
@@ -1088,6 +1088,9 @@
   function afterDataSwap(message) {
     selectedId = null;
     activeField = null;
+    /* Kept while the List view is out: it holds that view's own selection, and
+       leaving it stale would greet a revived list with a row selected out of a
+       tree that no longer exists. */
     Views.setListSelection(null);
     Tree.setRoot(null);
     refresh();
@@ -1224,8 +1227,6 @@
         openFixedView('apps');
       } else if (ev.key === 'j') {
         openFixedView('projects');
-      } else if (ev.key === 'l') {
-        openFixedView('list');
       } else if (ev.key === 's') {
         openFixedView('stats');
       } else if (ev.key === 't') {
@@ -1267,7 +1268,6 @@
       clearTimeout(typing);
       typing = setTimeout(() => {
         Tree.setQuery(input.value);
-        if (currentView === 'list') Views.renderList(selectedId);
       }, 110);
     });
     input.addEventListener('keydown', ev => {
@@ -1276,7 +1276,6 @@
          pending redraw is cancelled and done now instead of dropped. */
       clearTimeout(typing);
       Tree.setQuery(input.value);
-      if (currentView === 'list') Views.renderList(selectedId);
 
       const q = input.value.trim().toLowerCase();
       const hit = Store.state.nodes.find(n => n.name.toLowerCase().includes(q));
@@ -1381,16 +1380,14 @@
         renderTabs();
         selectNode(id, { center: true });
       },
-      /* From a list row: select it without leaving the list. */
+      /* Select without moving the canvas: a secondary view picking a topic
+         should fill the inspector, not throw you back to the tree. */
       onSelect: id => selectNode(id),
       onFocus: id => Focus.open(id),
       onChanged: refresh,
       /* A description or checklist edit saves without rebuilding the panel the
-         user is typing into; only the tree and secondary views need redrawing. */
-      onQuietChange: () => {
-        Tree.render();
-        if (currentView === 'list') Views.renderList(selectedId);
-      },
+         user is typing into; only the canvas needs redrawing. */
+      onQuietChange: () => { Tree.render(); },
     });
 
     Tree.init({
@@ -1476,14 +1473,6 @@
     });
 
     document.getElementById('addDomainBtn').addEventListener('click', startNewField);
-
-    document.getElementById('listStatusFilter').addEventListener('change', () => Views.renderList(selectedId));
-    document.getElementById('listDomainFilter').addEventListener('change', () => Views.renderList(selectedId));
-    document.getElementById('listSort').addEventListener('change', () => Views.renderList(selectedId));
-    document.getElementById('listCollapseAll').addEventListener('click', ev => {
-      const folded = Views.collapseAllGroups();
-      ev.target.textContent = folded ? 'Expand all' : 'Collapse all';
-    });
 
     document.getElementById('focusForm').addEventListener('submit', ev => {
       ev.preventDefault();

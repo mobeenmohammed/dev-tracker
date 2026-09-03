@@ -7,7 +7,8 @@ dependencies and no build step, so GitHub Pages can serve it directly.
 ## What it does
 
 A tab bar runs across the top: **All**, then one tab per field, then **+**,
-with **Focus**, **List** and **Stats** always pinned on the right.
+with **Focus**, **Problems**, **Projects**, **Applications** and **Stats**
+always pinned on the right.
 
 - **All** — every field in one tree, which is where the connections between
   subjects are visible.
@@ -35,11 +36,17 @@ with **Focus**, **List** and **Stats** always pinned on the right.
   chosen, so most of the time it is one control. Picking only a field files the
   task against the field as a whole, and *No topic* is still the first choice,
   for the things that are not about any of it.
-- **List** — every topic as a filterable, sortable, foldable list. Selecting a
-  row opens an inline editor for notes, a quick time log, and sub-topics,
-  without leaving the list.
+
 - **Stats** — overall progress, a 26-week activity grid you can click into, a
   study streak, per-field progress bars, and the recent session feed.
+
+There used to be a **List** view — every topic as a filterable, sortable list.
+It went unused: it said nothing the tree does not, and reaching for it never
+happened. It is out of the app rather than out of the repository. Its markup in
+`index.html` is commented out, `app.js` no longer wires it up, and its code in
+`views.js` and its styles are left in place, so bringing it back is uncommenting
+the markup and restoring the handful of lines `app.js` lost. Nothing in the test
+suite covers it while it is out, which is worth knowing before reviving it.
 
 ### Getting around when there are a lot of fields
 
@@ -131,14 +138,21 @@ thing you came to the tree for, and having them open and shut under you as you
 read across them is worse than the width — reading three sub-topics in a row
 should not rearrange the picture three times.
 
-So nothing in a field's own tree folds. The one thing that does is a branch
-connected in from somewhere else, because that is a whole second tree arriving
-inside this one: its head carries a **+ / –** badge, and that badge is a
-toggle. Fold it, go and read something else, come back, and it is still
-folded. Searching still reaches inside a folded branch — one hiding the only
-hit looks exactly like no hit at all — and folds itself away again when the
-search is cleared. **⊕** draws every connected branch regardless, and again to
-get your folds back.
+So nothing in a field's own tree folds. What does is a branch connected in from
+somewhere else, because that is a whole second tree arriving inside this one —
+and anything inside one, since a borrowed branch can be as deep as the tree it
+came from and a control that folds its head but nothing under it is only half a
+control. Every borrowed card carries a **+ / –** badge, and that badge is a
+toggle: fold it, go and read something else, come back, and it is still folded.
+
+Folds belong to **where a topic is drawn**, not to the topic. The same topic
+borrowed into two trees folds in each of them on its own, and folding a
+borrowed copy never touches the tree it really lives in.
+
+Searching still reaches inside a folded branch — one hiding the only hit looks
+exactly like no hit at all — opening every borrowed branch on the way down to
+the match, and folding them away again when the search is cleared. **⊕** draws
+every borrowed branch regardless, and again to get your folds back.
 
 #### The fields you open
 
@@ -253,6 +267,15 @@ Start one from a card's ⏱ button, from **Focus on this topic** in the
 inspector, or with **w** on whatever is selected. You get a screen with the
 clock, the topic, and a box for what you are about to do.
 
+The screen takes **the colour of where that topic has got to** — the same idea
+as an application taking the colour of its stage — and names the status beside
+the title. The clock itself is lit in that colour while it runs and goes plainly
+grey when it does not, so a glance says both what you are working on and whether
+it is still counting. The pill that leads back to a running session carries the
+same colour, so the two read as one session rather than two indicators. A task
+in the day's checklist is tinted by the topic it is filed against, and a task
+filed against nothing is left untinted, which is what tells the two apart.
+
 - **Pause** when you are interrupted, **resume** when you are back. Space does
   both, so it costs one key.
 - Being pulled away is **counted rather than hidden**: the screen says *pulled
@@ -321,10 +344,10 @@ when it has focus); the width is remembered.
 
 ### Knowing when you last worked on something
 
-A topic's recency shows up as a date on its card, a line in the inspector, and
-a highlighted column in the list. A parent reports the most recent activity
-anywhere in its branch, so a quiet field is obvious at a glance. The stopwatch
-button on the canvas toggles the dates on the cards.
+A topic's recency shows up as a date on its card and a line in the inspector. A
+parent reports the most recent activity anywhere in its branch, so a quiet field
+is obvious at a glance. The stopwatch button on the canvas toggles the dates on
+the cards.
 
 ### How progress is calculated
 
@@ -788,7 +811,7 @@ drive the page in tests.
 | Suite | What it covers |
 | --- | --- |
 | `tests/store.test.mjs` | The data model, with no dependencies at all. |
-| `tests/browser/app.test.mjs` | The whole UI driven through real events: tabs, cards, the inspector, checklists, privacy, the list, and the focus checklist. |
+| `tests/browser/app.test.mjs` | The whole UI driven through real events: tabs, cards, the inspector, checklists, privacy, the stopwatch, and the focus checklist. |
 | `tests/browser/boot.test.mjs` | Starting up from saved state, including a field deleted since the last visit. |
 | `tests/browser/styles.test.mjs` | That nothing marked `hidden` is still displayed — a real bug once left an invisible overlay covering the canvas. |
 | `tests/extension.test.mjs` | Mapping Codeforces submissions to solves: verdict filtering, one entry per problem, incremental syncing, and the fields the API omits. |
@@ -807,7 +830,7 @@ drive the page in tests.
 | `n` | Add a sub-topic under the selection (or the field in focus) |
 | `N` | Start a new field |
 | `g` | Go to a field — opens the picker, then type / ↑↓ / Enter |
-| `t` `d` `p` `j` `a` `l` `s` | Tree / Focus / Problems / Projects / Applications / List / Stats |
+| `t` `d` `p` `j` `a` `s` | Tree / Focus / Problems / Projects / Applications / Stats |
 | `w` | Focus on the selected topic — starts the stopwatch, or goes back to it |
 | `Space` | Pause or resume, while the focus screen is up |
 | `f` | Fit the tree to the screen |

@@ -49,10 +49,10 @@ const check = (label, cond, detail = '') => {
 
 /* --- 1. reopens on the field and view it was left on, activity off --- */
 {
-  const { doc, window, errors } = await boot({ currentView: 'list', activeField: 'cpp', showActivity: false });
+  const { doc, window, errors } = await boot({ currentView: 'stats', activeField: 'cpp', showActivity: false });
   const tabs = [...doc.querySelectorAll('#fieldTabs .tab')];
-  check('list view restored', !doc.getElementById('view-list').hidden);
-  check('list tab marked active', [...doc.querySelectorAll('.tab-fixed')].find(t => t.dataset.view === 'list').classList.contains('is-active'));
+  check('saved view restored', !doc.getElementById('view-stats').hidden);
+  check('its tab marked active', [...doc.querySelectorAll('.tab-fixed')].find(t => t.dataset.view === 'stats').classList.contains('is-active'));
   check('field tab restored', window.Tree.rootId === 'cpp', String(window.Tree.rootId));
   /* A tree draws the field it is rooted on whole. */
   check('tree rooted on that field',
@@ -76,6 +76,24 @@ const check = (label, cond, detail = '') => {
   check('missing field falls back to All', window.Tree.rootId === null, String(window.Tree.rootId));
   check('All tab is active', [...doc.querySelectorAll('#fieldTabs .tab')][0].classList.contains('is-active'));
   check('no error on the missing field', errors.length === 0, errors.join(' | '));
+}
+
+/* --- 2b. a view that has since been taken out of the app --- */
+{
+  /* The List view was removed. Anyone who was last on it has 'list' saved, and
+     asking for a panel that is no longer in the markup would throw before a
+     single card was drawn — so an unknown view has to fall back to the tree. */
+  const { doc, window, errors } = await boot({ currentView: 'list', activeField: null, showActivity: true });
+  check('a view that no longer exists falls back to the tree',
+        !doc.getElementById('view-tree').hidden);
+  check('and no fixed view is left marked active',
+        ![...doc.querySelectorAll('.tab-fixed')].some(t => t.classList.contains('is-active')),
+        [...doc.querySelectorAll('.tab-fixed')].filter(t => t.classList.contains('is-active'))
+          .map(t => t.dataset.view).join(', '));
+  check('no List tab is offered any more',
+        ![...doc.querySelectorAll('.tab-fixed')].some(t => t.dataset.view === 'list'),
+        'a List tab is still in the bar');
+  check('and nothing threw on the way in', errors.length === 0, errors.join(' | '));
 }
 
 /* --- 3. no saved UI state at all --- */

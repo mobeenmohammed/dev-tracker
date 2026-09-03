@@ -1,5 +1,6 @@
 /* ============================================================
-   views.js — inspector panel, list view, stats view.
+   views.js — inspector panel, stats view, the daily focus list, and the list
+   view that is no longer wired into the app (see its own note below).
    Each renderer rebuilds its own subtree from the store.
    ============================================================ */
 
@@ -851,7 +852,16 @@ const Views = (() => {
     return sec;
   }
 
-  /* ---------------- list view ---------------- */
+  /* ---------------- list view (out of the app) ----------------
+
+     Nothing calls any of this. The List view was taken out because it said
+     nothing the tree does not and went unused; its markup in index.html is
+     commented out and app.js no longer wires it up.
+
+     It is kept rather than deleted because it works, and reviving it is
+     uncommenting the markup, restoring the six lines app.js lost, and the
+     three test sections that went with them. Do not build on it in the
+     meantime: nothing here is exercised by the suite any more. */
 
   /* Which branches are folded away in the list, kept separate from the tree's
      own collapse state so folding one does not disturb the other. */
@@ -1390,8 +1400,16 @@ const Views = (() => {
   }
 
   function taskRow(task) {
+    /* A task filed against a topic takes that topic's colour, the way an
+       application takes its stage's, so a day's list says at a glance how much
+       of it is on ground you have already covered. A task filed against
+       nothing takes none, which is what tells the two apart. */
+    const topic = task.nodeId ? Store.byId(task.nodeId) : null;
+    const status = topic ? Store.STATUS_BY_ID[topic.status] : null;
+    const tint = status ? ' status-of-' + topic.status : '';
+
     const row = document.createElement('div');
-    row.className = 'task' + (task.done ? ' is-done' : '');
+    row.className = 'task' + tint + (task.done ? ' is-done' : '');
     row.dataset.taskId = task.id;
 
     const check = document.createElement('button');
@@ -1425,12 +1443,12 @@ const Views = (() => {
     });
     row.appendChild(text);
 
-    const node = task.nodeId ? Store.byId(task.nodeId) : null;
-    if (node) {
+    if (topic) {
       const chip = document.createElement('button');
       chip.className = 'task-topic';
-      chip.textContent = node.name;
-      chip.title = 'Open ' + node.name + ' in the tree';
+      chip.textContent = topic.name;
+      chip.title = `Open ${topic.name} in the tree` +
+                   (status ? ' — ' + status.label.toLowerCase() : '');
       chip.addEventListener('click', () => onNavigate(task.nodeId));
       row.appendChild(chip);
     }

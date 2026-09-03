@@ -38,6 +38,12 @@ const Focus = (() => {
 
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+  /* The class that hands the stylesheet a topic's colour. A topic that has
+     since been deleted has no status to take one from, so it gets none and
+     everything falls back to its own default rather than to a wrong colour. */
+  const tintClass = node =>
+    node && Store.STATUS_BY_ID[node.status] ? ' status-of-' + node.status : '';
+
   function awayText(timer, pausedMs) {
     if (!timer.interruptions) return '';
     const away = Math.round(pausedMs / 60000);
@@ -144,7 +150,8 @@ const Focus = (() => {
        the screen it leads to is already up. */
     const pill = $('focusPill');
     pill.hidden = isOpen();
-    pill.className = 'focus-pill' + (live ? ' is-running' : ' is-paused');
+    pill.className = 'focus-pill' + (live ? ' is-running' : ' is-paused')
+                   + tintClass(node);
     pill.textContent = `${live ? '\u25CF' : '\u23F8'} ${clock(elapsed)}`;
     pill.title = `${live ? 'Focusing on' : 'Paused on'} ${node ? node.name : 'a topic'}` +
                  ' — click to go back to it';
@@ -170,6 +177,14 @@ const Focus = (() => {
     $('focusSessionTopic').textContent = node ? node.name : 'a topic that is gone';
     const field = node ? Store.domainOf(node.id) : null;
     $('focusWhere').textContent = field && field.id !== timer.nodeId ? `in ${field.name}` : '';
+
+    /* The panel takes the colour of where this topic has got to, and says so
+       in words beside it — half an hour is a long time to look at a screen
+       that tells you nothing about what you are looking at. */
+    $('focusPanel').className = 'focus-panel' + tintClass(node);
+    const badge = $('focusStatus');
+    badge.hidden = !node;
+    if (node) badge.textContent = Store.STATUS_BY_ID[node.status].label;
 
     $('focusElapsed').textContent = clock(elapsed);
     $('focusElapsed').classList.toggle('is-paused', !live);
